@@ -8,9 +8,8 @@ export default function Layout({ children }) {
     { path: "/", label: "Dashboard", icon: LayoutDashboard },
     { path: "/impresoras", label: "Impresoras", icon: Printer },
     { path: "/reportes", label: "Reportes", icon: BarChart2 },
-    { path: "/clientes-lealtad", label: "Clientes Lealtad", icon: Users }, // NUEVO
+    { path: "/clientes-lealtad", label: "Clientes Lealtad", icon: Users },
     { path: "/configuracion", label: "Configuración", icon: Settings },
-    { path: "/monitoreo", label: "Monitoreo", icon: ClipboardList },
   ];
 
   return (

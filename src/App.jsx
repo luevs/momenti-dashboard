@@ -5,8 +5,7 @@ import Dashboard from "./pages/Dashboard";
 import Impresoras from "./pages/Impresoras";
 import Reportes from "./pages/Reportes";
 import Configuracion from "./pages/Configuracion";
-import Monitoreo from "./pages/Monitoreo";
-import ClientesLealtad from "./pages/Clientes-lealtad"; // Nuevo
+import ClientesLealtad from "./pages/clientes-lealtad";
 
 function App() {
   return (
@@ -16,7 +15,6 @@ function App() {
         <Route path="/impresoras" element={<Layout><Impresoras /></Layout>} />
         <Route path="/reportes" element={<Layout><Reportes /></Layout>} />
         <Route path="/configuracion" element={<Layout><Configuracion /></Layout>} />
-        <Route path="/monitoreo" element={<Layout><Monitoreo /></Layout>} />
         <Route path="/clientes-lealtad" element={<Layout><ClientesLealtad /></Layout>} /> {/* Nueva ruta */}
       </Routes>
     </Router>
