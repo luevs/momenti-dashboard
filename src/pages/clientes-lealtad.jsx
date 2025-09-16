@@ -722,14 +722,15 @@ export default function ClientesLealtad() {
                         <button
                           onClick={() => {
                             const numero = selectedClient.numeroWpp.replace(/\D/g, "");
-                            const mensaje = `¡Hola ${selectedClient.name}! Acabas de consumir ${record.meters_consumed} metros de tu programa de lealtad (${record.type}). Te quedan ${selectedClient.remainingMeters} metros en tu plan. ¡Gracias por tu preferencia!`;
+                            const fechaPedido = new Date(record.recorded_at).toLocaleDateString('es-MX');
+                            const mensaje = `¡Hola ${selectedClient.name}! El día ${fechaPedido} consumiste ${record.meters_consumed} metros de tu programa de lealtad (${record.type}). Te quedan ${selectedClient.remainingMeters} metros en tu plan. ¡Gracias por tu preferencia!`;
                             const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
                             window.open(url, "_blank");
                           }}
                           className="flex items-center gap-1 px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition mt-2 sm:mt-0"
                           title="Enviar mensaje de WhatsApp"
                         >
-                          <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M20.52 3.48A11.93 11.93 0 0 0 12 0C5.37 0 0 5.37 0 12c0 2.11.55 4.16 1.6 5.97L0 24l6.22-1.62A11.94 11.94 0 0 0 12 24c6.63 0 12-5.37 12-12 0-3.19-1.24-6.19-3.48-8.52zM12 22c-1.85 0-3.68-.5-5.25-1.44l-.38-.22-3.69.96.99-3.59-.25-.37A9.94 9.94 0 0 1 2 12c0-5.52 4.48-10 10-10s10 4.48 10 10-4.48 10-10 10zm5.2-7.8c-.28-.14-1.65-.81-1.9-.9-.25-.09-.43-.14-.61.14-.18.28-.7.9-.86 1.08-.16.18-.32.2-.6.07-.28-.14-1.18-.44-2.25-1.4-.83-.74-1.39-1.65-1.56-1.93-.16-.28-.02-.43.12-.57.12-.12.28-.32.42-.48.14-.16.18-.28.28-.46.09-.18.05-.34-.02-.48-.07-.14-.61-1.47-.84-2.02-.22-.53-.45-.46-.61-.47-.16-.01-.34-.01-.52-.01-.18 0-.48.07-.73.34-.25.28-.96.94-.96 2.3 0 1.36.98 2.68 1.12 2.87.14.18 1.93 2.95 4.68 4.02.65.28 1.16.45 1.56.58.65.21 1.24.18 1.7.11.52-.08 1.65-.67 1.88-1.32.23-.65.23-1.2.16-1.32-.07-.12-.25-.18-.53-.32z"/></svg>
+                          {/* ...icono... */}
                           WhatsApp
                         </button>
                       )}
