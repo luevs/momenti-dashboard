@@ -37,8 +37,16 @@ const getCurrentUser = () => {
   return localStorage.getItem('currentUser') || 'Sistema';
 };
 
+function getExpiringThreshold(totalMeters) {
+  if (totalMeters <= 5) return 0.5;
+  if (totalMeters > 5 && totalMeters <= 10) return 0.333;
+  if (totalMeters > 10 && totalMeters <= 30) return 0.2;
+  return 0.1;
+}
+
 export default function ClientesLealtad() {
-  const [clientes, setClientes] = useState([]);
+  const [allClients, setAllClients] = useState([]);
+  const [clientes, setClientes] = useState([]); // filtrados por tipo
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
   const [metrosConsumidos, setMetrosConsumidos] = useState("");
@@ -68,6 +76,7 @@ export default function ClientesLealtad() {
   // Estados para el modal de pedido mejorado
   const [observaciones, setObservaciones] = useState("");
   const [registeredBy, setRegisteredBy] = useState(getCurrentUser());
+  const [registeredByCustom, setRegisteredByCustom] = useState("");
 
   // Nuevos estados para el historial global
   const [globalHistoryModalOpen, setGlobalHistoryModalOpen] = useState(false);
@@ -76,24 +85,23 @@ export default function ClientesLealtad() {
 
   const [activeTab, setActiveTab] = useState("clientes"); // "clientes" o "historial"
 
+  // 1. Solo una función para traer todos los clientes
   const fetchClients = async () => {
     setIsLoading(true);
     const { data, error } = await supabase
       .from('loyalty_clients')
-      .select('*')
-      .eq('type', filtroTipo);
-
+      .select('*');
     if (error) {
       console.error("Error al obtener clientes:", error);
     } else {
-      setClientes(data);
+      setAllClients(data);
     }
     setIsLoading(false);
   };
 
   useEffect(() => {
     fetchClients();
-  }, [filtroTipo]);
+  }, []);
 
   const abrirModal = (cliente) => {
     setSelectedClient(cliente);
@@ -213,7 +221,9 @@ export default function ClientesLealtad() {
         if (selectedClient.numeroWpp) {
           const numero = selectedClient.numeroWpp.replace(/\D/g, "");
           const metrosRestantes = selectedClient.remainingMeters - metros;
-          const mensaje = `¡Hola ${selectedClient.name}! Acabas de consumir ${metros} metros de tu programa de lealtad (${selectedClient.type}). Te quedan ${metrosRestantes} metros en tu plan. ¡Gracias por tu preferencia!`;
+          // Para registrar pedido (en registrarPedido)
+          const fechaPedido = new Date().toLocaleDateString('es-MX');
+          const mensaje = `¡Hola ${selectedClient.name}! El día ${fechaPedido} consumiste ${metros} metros de tu programa de lealtad (${selectedClient.type}). Te quedan ${metrosRestantes} metros en tu plan. ¡Gracias por tu preferencia!`;
           const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
           window.open(url, "_blank");
         }
@@ -328,8 +338,13 @@ export default function ClientesLealtad() {
   };
 
   const handleSaveEdit = async () => {
-    if (!editingClientData.name || !editingClientData.totalMeters) {
-      alert("El nombre y los metros totales son campos obligatorios.");
+    if (
+      !editingClientData.name ||
+      !editingClientData.totalMeters ||
+      !editingClientData.editReason ||
+      !editingClientData.editAuthorizedBy
+    ) {
+      alert("Todos los campos son obligatorios, incluyendo razón y autorización.");
       return;
     }
 
@@ -342,7 +357,9 @@ export default function ClientesLealtad() {
           totalMeters: parseFloat(editingClientData.totalMeters),
           remainingMeters: parseFloat(editingClientData.remainingMeters),
           numeroWpp: editingClientData.numeroWpp,
-          lastPurchase: editingClientData.lastPurchase
+          lastPurchase: editingClientData.lastPurchase,
+          editReason: editingClientData.editReason,
+          editAuthorizedBy: editingClientData.editAuthorizedBy
         })
         .eq('id', editingClientData.id);
 
@@ -377,11 +394,19 @@ export default function ClientesLealtad() {
     return { total, promedio: promedio.toFixed(2), ultimoMes };
   };
   
-  const filteredClients = clientes
+  // 2. Filtra los clientes para la tabla
+  const filteredClients = allClients
+    .filter(cliente => cliente.type === filtroTipo)
+    .filter(cliente => cliente.name.toLowerCase().includes(searchQuery.toLowerCase()))
     .filter(cliente => {
-      const matchesName = cliente.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesExpiring = showExpiringClients ? cliente.remainingMeters < 5 : true;
-      return matchesName && matchesExpiring;
+      if (!showExpiringClients) return true;
+      const clientStatus = getClientStatus(cliente.remainingMeters, cliente.totalMeters);
+      const expiringThreshold = getExpiringThreshold(cliente.totalMeters);
+      return (
+        clientStatus === 'activo' &&
+        cliente.remainingMeters > 0 &&
+        cliente.remainingMeters <= (cliente.totalMeters * expiringThreshold)
+      );
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -459,6 +484,34 @@ export default function ClientesLealtad() {
         </div>
       </div>
       
+      {/* SCORECARDS - Mueve este bloque aquí */}
+      <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="bg-blue-50 p-4 rounded-lg text-center">
+          <p className="text-2xl font-bold text-blue-600">
+            {allClients.filter(c => c.type === "DTF").length}
+          </p>
+          <p className="text-sm text-gray-600">Clientes DTF</p>
+        </div>
+        <div className="bg-purple-50 p-4 rounded-lg text-center">
+          <p className="text-2xl font-bold text-purple-600">
+            {allClients.filter(c => c.type === "UV DTF").length}
+          </p>
+          <p className="text-sm text-gray-600">Clientes UV DTF</p>
+        </div>
+        <div className="bg-green-50 p-4 rounded-lg text-center">
+          <p className="text-2xl font-bold text-green-600">
+            {allClients.length}
+          </p>
+          <p className="text-sm text-gray-600">Programas vendidos</p>
+        </div>
+        <div className="bg-yellow-50 p-4 rounded-lg text-center">
+          <p className="text-2xl font-bold text-yellow-600">
+            {allClients.reduce((sum, c) => sum + parseFloat(c.totalMeters), 0)}
+          </p>
+          <p className="text-sm text-gray-600">Metros vendidos</p>
+        </div>
+      </div>
+
       {/* Selector de tipo y buscador */}
       <div className="flex flex-col sm:flex-row sm:items-center space-y-4 sm:space-y-0 sm:space-x-4 mb-6">
         <div className="flex space-x-2">
@@ -529,13 +582,27 @@ export default function ClientesLealtad() {
               
               <div>
                 <label className="block text-gray-700 font-bold mb-2">Registrado por *</label>
-                <input
-                  type="text"
-                  placeholder="Nombre de quien registra"
+                <select
                   value={registeredBy}
-                  onChange={(e) => setRegisteredBy(e.target.value)}
+                  onChange={e => setRegisteredBy(e.target.value)}
                   className="border rounded px-3 py-2 w-full"
-                />
+                >
+                  <option value="">Selecciona...</option>
+                  <option value="Jasiel">Jasiel</option>
+                  <option value="Daniela">Daniela</option>
+                  <option value="Karla">Karla</option>
+                  <option value="Eduardo">Eduardo</option>
+                  <option value="Otro">Otro</option>
+                </select>
+                {registeredBy === "Otro" && (
+                  <input
+                    type="text"
+                    placeholder="Escribe el nombre"
+                    value={registeredByCustom}
+                    onChange={e => setRegisteredByCustom(e.target.value)}
+                    className="border rounded px-3 py-2 w-full mt-2"
+                  />
+                )}
               </div>
 
               <div>
@@ -631,39 +698,41 @@ export default function ClientesLealtad() {
 
                 {/* Lista de historial */}
                 <div className="space-y-4">
-                  {clientHistory.map((record) => (
-                    <div key={record.id} className="border border-gray-200 rounded-lg p-4">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Clock className="text-gray-400" size={16} />
-                            <span className="text-lg font-semibold text-blue-600">
-                              {record.meters_consumed}m
-                            </span>
-                            <span className="text-sm text-gray-500">
-                              - {formatDate(record.recorded_at)}
-                            </span>
-                          </div>
-                          
-                          <div className="flex items-center gap-4 text-sm text-gray-600 mb-2">
-                            <span className="flex items-center gap-1">
-                              <User size={14} />
-                              Registrado por: {record.recorded_by}
-                            </span>
-                          </div>
-
-                          {/* Comentado hasta agregar columna observaciones
-                          {record.observaciones && (
-                            <div className="flex items-start gap-2 mt-2">
-                              <FileText className="text-gray-400 mt-0.5" size={14} />
-                              <p className="text-sm text-gray-700 bg-gray-50 p-2 rounded">
-                                {record.observaciones}
-                              </p>
-                            </div>
-                          )}
-                          */}
+                  {clientHistory.map((record, idx) => (
+                    <div key={record.id} className="border border-gray-200 rounded-lg p-4 flex flex-col sm:flex-row sm:justify-between sm:items-center">
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Clock className="text-gray-400" size={16} />
+                          <span className="text-lg font-semibold text-blue-600">
+                            {record.meters_consumed}m
+                          </span>
+                          <span className="text-sm text-gray-500">
+                            - {formatDate(record.recorded_at)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-gray-600 mb-2">
+                          <span className="flex items-center gap-1">
+                            <User size={14} />
+                            Registrado por: {record.recorded_by}
+                          </span>
                         </div>
                       </div>
+                      {/* Botón de WhatsApp solo para el último pedido y si hay número */}
+                      {idx === 0 && selectedClient?.numeroWpp && (
+                        <button
+                          onClick={() => {
+                            const numero = selectedClient.numeroWpp.replace(/\D/g, "");
+                            const mensaje = `¡Hola ${selectedClient.name}! Acabas de consumir ${record.meters_consumed} metros de tu programa de lealtad (${record.type}). Te quedan ${selectedClient.remainingMeters} metros en tu plan. ¡Gracias por tu preferencia!`;
+                            const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
+                            window.open(url, "_blank");
+                          }}
+                          className="flex items-center gap-1 px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition mt-2 sm:mt-0"
+                          title="Enviar mensaje de WhatsApp"
+                        >
+                          <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M20.52 3.48A11.93 11.93 0 0 0 12 0C5.37 0 0 5.37 0 12c0 2.11.55 4.16 1.6 5.97L0 24l6.22-1.62A11.94 11.94 0 0 0 12 24c6.63 0 12-5.37 12-12 0-3.19-1.24-6.19-3.48-8.52zM12 22c-1.85 0-3.68-.5-5.25-1.44l-.38-.22-3.69.96.99-3.59-.25-.37A9.94 9.94 0 0 1 2 12c0-5.52 4.48-10 10-10s10 4.48 10 10-4.48 10-10 10zm5.2-7.8c-.28-.14-1.65-.81-1.9-.9-.25-.09-.43-.14-.61.14-.18.28-.7.9-.86 1.08-.16.18-.32.2-.6.07-.28-.14-1.18-.44-2.25-1.4-.83-.74-1.39-1.65-1.56-1.93-.16-.28-.02-.43.12-.57.12-.12.28-.32.42-.48.14-.16.18-.28.28-.46.09-.18.05-.34-.02-.48-.07-.14-.61-1.47-.84-2.02-.22-.53-.45-.46-.61-.47-.16-.01-.34-.01-.52-.01-.18 0-.48.07-.73.34-.25.28-.96.94-.96 2.3 0 1.36.98 2.68 1.12 2.87.14.18 1.93 2.95 4.68 4.02.65.28 1.16.45 1.56.58.65.21 1.24.18 1.7.11.52-.08 1.65-.67 1.88-1.32.23-.65.23-1.2.16-1.32-.07-.12-.25-.18-.53-.32z"/></svg>
+                          WhatsApp
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -746,7 +815,7 @@ export default function ClientesLealtad() {
       {/* MODAL DE EDICIÓN */}
       {editClientModalOpen && editingClientData && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
-          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-lg relative">
+          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-lg relative max-h-[450px] overflow-y-auto">
             <button
               onClick={handleCloseEditModal}
               className="absolute top-3 right-3 text-gray-500 hover:text-black"
@@ -804,6 +873,25 @@ export default function ClientesLealtad() {
                 onChange={e => setEditingClientData({ ...editingClientData, lastPurchase: e.target.value })}
                 className="border rounded px-3 py-2 w-full"
               />
+
+              {/* NUEVOS CAMPOS */}
+              <label className="block text-gray-700 font-bold">Razón de Edición *</label>
+              <input
+                type="text"
+                value={editingClientData.editReason || ""}
+                onChange={e => setEditingClientData({ ...editingClientData, editReason: e.target.value })}
+                className="border rounded px-3 py-2 w-full"
+                placeholder="Explica la razón de la edición"
+              />
+              <label className="block text-gray-700 font-bold">Quién autoriza la edición *</label>
+              <input
+                type="text"
+                value={editingClientData.editAuthorizedBy || ""}
+                onChange={e => setEditingClientData({ ...editingClientData, editAuthorizedBy: e.target.value })}
+                className="border rounded px-3 py-2 w-full"
+                placeholder="Nombre de quien autoriza"
+              />
+
               <button
                 onClick={handleSaveEdit}
                 className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
@@ -877,7 +965,11 @@ export default function ClientesLealtad() {
               <ul className="divide-y divide-gray-200">
                 {filteredClients.map((cliente) => {
                   const clientStatus = getClientStatus(cliente.remainingMeters, cliente.totalMeters);
-                  const isAboutToExpire = cliente.remainingMeters <= (cliente.totalMeters * 0.5);
+                  const expiringThreshold = getExpiringThreshold(cliente.totalMeters);
+                  const isAboutToExpire =
+                    clientStatus === 'activo' &&
+                    cliente.remainingMeters > 0 &&
+                    cliente.remainingMeters <= (cliente.totalMeters * expiringThreshold);
                   
                   let rowClasses = "py-3 transition grid grid-cols-6 items-center";
                   if (clientStatus === 'expirado') {
@@ -900,9 +992,11 @@ export default function ClientesLealtad() {
                               Por expirar
                             </span>
                           )}
-                          <span className={`block mt-1 text-xs px-2 py-1 rounded-full ${estadoColores[clientStatus]}`}>
-                            {clientStatus}
-                          </span>
+                          {clientStatus === 'expirado' && (
+                            <span className="block mt-1 text-xs px-2 py-1 rounded-full bg-red-100 text-red-800">
+                              expirado
+                            </span>
+                          )}
                         </div>
                       </div>
                       {/* Contacto */}
