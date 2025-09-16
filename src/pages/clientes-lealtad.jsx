@@ -50,11 +50,11 @@ export default function ClientesLealtad() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
   const [metrosConsumidos, setMetrosConsumidos] = useState("");
-  const [filtroTipo, setFiltroTipo] = useState("DTF");
+  const [filtroTipo, setFiltroTipo] = useState("DTF Textil");
   const [isLoading, setIsLoading] = useState(true);
   
   const [addClientModalOpen, setAddClientModalOpen] = useState(false);
-  const [newClientData, setNewClientData] = useState({ name: "", type: "DTF", totalMeters: "", numeroWpp: "", lastPurchase: "" });
+  const [newClientData, setNewClientData] = useState({ name: "", type: "DTF Textil", totalMeters: "", numeroWpp: "", lastPurchase: "" });
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteReason, setDeleteReason] = useState([]);
@@ -220,10 +220,12 @@ export default function ClientesLealtad() {
         // Enviar mensaje por WhatsApp si el número está disponible
         if (selectedClient.numeroWpp) {
           const numero = selectedClient.numeroWpp.replace(/\D/g, "");
-          const metrosRestantes = selectedClient.remainingMeters - metros;
+          const metrosRestantes = parseFloat((selectedClient.remainingMeters - metros).toFixed(2));
+          const metrosConsumidos = parseFloat(metros.toFixed(2));
           // Para registrar pedido (en registrarPedido)
           const fechaPedido = new Date().toLocaleDateString('es-MX');
-          const mensaje = `¡Hola ${selectedClient.name}! El día ${fechaPedido} consumiste ${metros} metros de tu programa de lealtad (${selectedClient.type}). Te quedan ${metrosRestantes} metros en tu plan. ¡Gracias por tu preferencia!`;
+          const saludo = `Saludos ${selectedClient.name}\nLe informamos que su pedido de ${selectedClient.type} ya está listo para que pase por el.`;
+          const mensaje = `${saludo}\nEl día ${fechaPedido} consumiste ${metrosConsumidos} metros de tu programa de lealtad (${selectedClient.type}). Te quedan ${metrosRestantes} metros en tu plan. ¡Gracias por tu preferencia!`;
           const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
           window.open(url, "_blank");
         }
@@ -264,7 +266,7 @@ export default function ClientesLealtad() {
       } else {
         alert("Cliente agregado correctamente");
         setAddClientModalOpen(false);
-        setNewClientData({ name: "", type: "DTF", totalMeters: "", numeroWpp: "", lastPurchase: "" });
+        setNewClientData({ name: "", type: "DTF Textil", totalMeters: "", numeroWpp: "", lastPurchase: "" });
         fetchClients();
       }
     } catch (err) {
@@ -488,9 +490,9 @@ export default function ClientesLealtad() {
       <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="bg-blue-50 p-4 rounded-lg text-center">
           <p className="text-2xl font-bold text-blue-600">
-            {allClients.filter(c => c.type === "DTF").length}
+            {allClients.filter(c => c.type === "DTF Textil").length}
           </p>
-          <p className="text-sm text-gray-600">Clientes DTF</p>
+          <p className="text-sm text-gray-600">Clientes DTF Textil</p>
         </div>
         <div className="bg-purple-50 p-4 rounded-lg text-center">
           <p className="text-2xl font-bold text-purple-600">
@@ -516,12 +518,12 @@ export default function ClientesLealtad() {
       <div className="flex flex-col sm:flex-row sm:items-center space-y-4 sm:space-y-0 sm:space-x-4 mb-6">
         <div className="flex space-x-2">
           <button
-            onClick={() => { setFiltroTipo("DTF"); setShowExpiringClients(false); }}
+            onClick={() => { setFiltroTipo("DTF Textil"); setShowExpiringClients(false); }}
             className={`px-4 py-2 rounded-lg font-semibold transition ${
-              filtroTipo === "DTF" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              filtroTipo === "DTF Textil" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
             }`}
           >
-            DTF
+            DTF Textil
           </button>
           <button
             onClick={() => { setFiltroTipo("UV DTF"); setShowExpiringClients(false); }}
@@ -617,8 +619,13 @@ export default function ClientesLealtad() {
 
               {selectedClient && (
                 <div className="bg-gray-50 p-3 rounded text-sm">
-                  <p><strong>Metros restantes actuales:</strong> {selectedClient.remainingMeters}m</p>
-                  <p><strong>Después del pedido:</strong> {selectedClient.remainingMeters - parseFloat(metrosConsumidos || 0)}m</p>
+                  <p>
+                    <strong>Metros restantes actuales:</strong> {parseFloat(selectedClient.remainingMeters.toFixed(2))}m
+                  </p>
+                  <p>
+                    <strong>Después del pedido:</strong>{" "}
+                    {parseFloat((selectedClient.remainingMeters - parseFloat(metrosConsumidos || 0)).toFixed(2))}m
+                  </p>
                 </div>
               )}
 
@@ -723,14 +730,16 @@ export default function ClientesLealtad() {
                           onClick={() => {
                             const numero = selectedClient.numeroWpp.replace(/\D/g, "");
                             const fechaPedido = new Date(record.recorded_at).toLocaleDateString('es-MX');
-                            const mensaje = `¡Hola ${selectedClient.name}! El día ${fechaPedido} consumiste ${record.meters_consumed} metros de tu programa de lealtad (${record.type}). Te quedan ${selectedClient.remainingMeters} metros en tu plan. ¡Gracias por tu preferencia!`;
+                            const saludo = `Saludos ${selectedClient.name}\nLe informamos que su pedido de ${record.type} ya está listo para que pase por el.`;
+                            const metrosConsumidos = parseFloat(record.meters_consumed.toFixed(2));
+                            const metrosRestantes = parseFloat(selectedClient.remainingMeters.toFixed(2));
+                            const mensaje = `${saludo}\nEl día ${fechaPedido} consumiste ${metrosConsumidos} metros de tu programa de lealtad (${record.type}). Te quedan ${metrosRestantes} metros en tu plan. ¡Gracias por tu preferencia!`;
                             const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
                             window.open(url, "_blank");
                           }}
                           className="flex items-center gap-1 px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition mt-2 sm:mt-0"
                           title="Enviar mensaje de WhatsApp"
                         >
-                          {/* ...icono... */}
                           WhatsApp
                         </button>
                       )}
@@ -782,7 +791,7 @@ export default function ClientesLealtad() {
                 onChange={(e) => setNewClientData({ ...newClientData, type: e.target.value })}
                 className="border rounded px-3 py-2 w-full"
               >
-                <option value="DTF">DTF</option>
+                <option value="DTF Textil">DTF Textil</option>
                 <option value="UV DTF">UV DTF</option>
               </select>
               <label className="block text-gray-700 font-bold">Metros totales del programa *</label>
@@ -848,7 +857,7 @@ export default function ClientesLealtad() {
                 onChange={e => setEditingClientData({ ...editingClientData, type: e.target.value })}
                 className="border rounded px-3 py-2 w-full"
               >
-                <option value="DTF">DTF</option>
+                <option value="DTF Textil">DTF Textil</option>
                 <option value="UV DTF">UV DTF</option>
               </select>
               <label className="block text-gray-700 font-bold">Metros totales *</label>
@@ -1003,9 +1012,9 @@ export default function ClientesLealtad() {
                       {/* Contacto */}
                       <span className="truncate">{cliente.numeroWpp || "-"}</span>
                       {/* Total */}
-                      <span>{cliente.totalMeters} m</span>
+                      <span>{parseFloat(cliente.totalMeters.toFixed(2))} m</span>
                       {/* Restantes */}
-                      <span>{cliente.remainingMeters} m</span>
+                      <span>{parseFloat(cliente.remainingMeters.toFixed(2))} m</span>
                       {/* Última Compra */}
                       <span>{cliente.lastPurchase}</span>
                       {/* Acciones */}
