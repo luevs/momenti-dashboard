@@ -750,54 +750,65 @@ export default function ClientesLealtad() {
                         </div>
                       </div>
                       {/* Botón de WhatsApp solo para el último pedido y si hay número */}
-                      {idx === 0 && selectedClient?.numeroWpp && (
-                        <button
-                          onClick={() => {
-                            const numero = selectedClient.numeroWpp.replace(/\D/g, "");
-                            const fechaPedido = new Date(record.recorded_at).toLocaleDateString('es-MX');
-                            const saludo = `Saludos ${selectedClient.name}\nLe informamos que su pedido de ${record.type} ya está listo para que pase por el.`;
-                            const metrosConsumidos = parseFloat(record.meters_consumed.toFixed(2));
-                            const metrosRestantes = parseFloat(selectedClient.remainingMeters.toFixed(2));
-                            const mensaje = `${saludo}\nEl día ${fechaPedido} consumiste ${metrosConsumidos} metros de tu programa de lealtad (${record.type}). Te quedan ${metrosRestantes} metros en tu plan. ¡Gracias por tu preferencia!`;
-                            const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
-                            window.open(url, "_blank");
-                          }}
-                          className="flex items-center gap-1 px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition mt-2 sm:mt-0"
-                          title="Enviar mensaje de WhatsApp"
-                        >
-                          WhatsApp
-                        </button>
-                      )}
                       {idx === 0 && (
-                        <button
-                          onClick={() => {
-                            // Prepara los datos del ticket igual que en registrarPedido
-                            const ticketInfo = {
-                              client: {
-                                id: selectedClient.id,
-                                name: selectedClient.name,
-                                type: selectedClient.type,
-                                totalMeters: selectedClient.totalMeters,
-                                remainingMeters: selectedClient.remainingMeters,
-                                numeroWpp: selectedClient.numeroWpp
-                              },
-                              order: {
-                                metersConsumed: record.meters_consumed,
-                                registeredBy: record.recorded_by,
-                                observaciones: record.observaciones,
-                                recordedAt: record.recorded_at,
-                                folio: record.folio || Math.floor(Math.random() * 9999) + 1000
+                        <>
+                          {/* Botón de WhatsApp */}
+                          <button
+                            onClick={() => {
+                              if (!selectedClient?.numeroWpp) {
+                                alert("Este cliente no tiene número de WhatsApp registrado");
+                                return;
                               }
-                            };
-                            setTicketData(ticketInfo);
-                            setTicketModalOpen(true);
-                          }}
-                          className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition mt-2 sm:mt-0"
-                          title="Imprimir Ticket"
-                        >
-                          <FileText size={16} />
-                          Imprimir Ticket
-                        </button>
+                              const numero = selectedClient.numeroWpp.replace(/\D/g, "");
+                              const fechaPedido = new Date(record.recorded_at).toLocaleDateString('es-MX');
+                              const saludo = `Saludos ${selectedClient.name}\nLe informamos que su pedido de ${record.type} ya está listo para que pase por el.`;
+                              const metrosConsumidos = parseFloat(record.meters_consumed.toFixed(2));
+                              const metrosRestantes = parseFloat(selectedClient.remainingMeters.toFixed(2));
+                              const mensaje = `${saludo}\nEl día ${fechaPedido} consumiste ${metrosConsumidos} metros de tu programa de lealtad (${record.type}). Te quedan ${metrosRestantes} metros en tu plan. ¡Gracias por tu preferencia!`;
+                              const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
+                              window.open(url, "_blank");
+                            }}
+                            className={`flex items-center gap-1 px-3 py-1 rounded transition mt-2 sm:mt-0 ${
+                              selectedClient?.numeroWpp 
+                                ? "bg-green-500 text-white hover:bg-green-600" 
+                                : "bg-gray-300 text-gray-600 cursor-not-allowed"
+                            }`}
+                            title={selectedClient?.numeroWpp ? "Enviar mensaje de WhatsApp" : "Cliente sin número de WhatsApp"}
+                            disabled={!selectedClient?.numeroWpp}
+                          >
+                            WhatsApp
+                          </button>
+
+                          {/* Botón de Imprimir Ticket */}
+                          <button
+                            onClick={() => {
+                              const ticketInfo = {
+                                client: {
+                                  id: selectedClient.id,
+                                  name: selectedClient.name,
+                                  type: selectedClient.type,
+                                  totalMeters: selectedClient.totalMeters,
+                                  remainingMeters: selectedClient.remainingMeters,
+                                  numeroWpp: selectedClient.numeroWpp
+                                },
+                                order: {
+                                  metersConsumed: record.meters_consumed,
+                                  registeredBy: record.recorded_by,
+                                  observaciones: record.observaciones || '',
+                                  recordedAt: record.recorded_at,
+                                  folio: record.folio || Math.floor(Math.random() * 9999) + 1000
+                                }
+                              };
+                              setTicketData(ticketInfo);
+                              setTicketModalOpen(true);
+                            }}
+                            className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition mt-2 sm:mt-0"
+                            title="Imprimir Ticket"
+                          >
+                            <FileText size={16} />
+                            Imprimir Ticket
+                          </button>
+                        </>
                       )}
                     </div>
                   ))}
