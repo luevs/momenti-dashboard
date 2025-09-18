@@ -1,5 +1,6 @@
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
+import Login from "./pages/Login";
 import './index.css';
 
 import Dashboard from "./pages/Dashboard";
@@ -10,19 +11,57 @@ import ClientesLealtad from "./pages/clientes-lealtad";
 import Insumos from "./pages/insumos";
 import MaquinaDetalle from "./pages/MaquinaDetalle";
 
+// Componente para proteger rutas
+const PrivateRoute = ({ children }) => {
+  const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
+  return isAuthenticated ? children : <Navigate to="/login" />;
+};
+
 function App() {
   return (
-   <Router>
-  <Routes>
-    <Route path="/" element={<Layout><Dashboard /></Layout>} />
-    <Route path="/maquinas" element={<Layout><Maquinas /></Layout>} />
-    <Route path="/maquinas/:id" element={<Layout><MaquinaDetalle /></Layout>} />
-    <Route path="/reportes" element={<Layout><Reportes /></Layout>} />
-    <Route path="/configuracion" element={<Layout><Configuracion /></Layout>} />
-    <Route path="/clientes-lealtad" element={<Layout><ClientesLealtad /></Layout>} />
-    <Route path="/insumos" element={<Layout><Insumos /></Layout>} />
-  </Routes>
-</Router>
+    <Router>
+      <Routes>
+        {/* Ruta pública */}
+        <Route path="/login" element={<Login />} />
+
+        {/* Rutas protegidas */}
+        <Route path="/" element={
+          <PrivateRoute>
+            <Layout><Dashboard /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/maquinas" element={
+          <PrivateRoute>
+            <Layout><Maquinas /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/maquinas/:id" element={
+          <PrivateRoute>
+            <Layout><MaquinaDetalle /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/reportes" element={
+          <PrivateRoute>
+            <Layout><Reportes /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/configuracion" element={
+          <PrivateRoute>
+            <Layout><Configuracion /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/clientes-lealtad" element={
+          <PrivateRoute>
+            <Layout><ClientesLealtad /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/insumos" element={
+          <PrivateRoute>
+            <Layout><Insumos /></Layout>
+          </PrivateRoute>
+        } />
+      </Routes>
+    </Router>
   );
 }
 

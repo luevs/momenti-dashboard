@@ -1,9 +1,13 @@
 import { Link, useLocation } from "react-router-dom";
 import { Package2 } from "lucide-react";
 import { LayoutDashboard, Printer, FileText, Settings, Users, BarChart2, Package, ClipboardList, Wrench } from "lucide-react";
+import { LogOut } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+
 
 export default function Layout({ children }) {
   const location = useLocation();
+  const navigate = useNavigate();
 
   const menuItems = [
     { path: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -13,6 +17,11 @@ export default function Layout({ children }) {
     { path: "/configuracion", label: "Configuración", icon: Settings },
     { path: "/insumos", label: "Insumos", icon: Package2 },
   ];
+
+  const handleLogout = () => {
+    localStorage.removeItem('isAuthenticated');
+    navigate('/login');
+  };
 
   return (
     <div className="flex min-h-screen bg-gray-100 text-gray-800">
@@ -43,11 +52,20 @@ export default function Layout({ children }) {
         {/* Topbar */}
         <header className="bg-white shadow px-6 py-4 flex justify-between items-center">
           <h1 className="text-xl font-semibold">Panel de Control</h1>
-          <span className="text-sm text-gray-600">Usuario</span>
         </header>
 
         {/* Dynamic content */}
-        <main className="p-6">{children}</main>
+        <div className="flex-1">
+          {/* Agregar botón de logout en el header o donde prefieras */}
+          <button
+            onClick={handleLogout}
+            className="absolute top-4 right-4 flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:text-red-700"
+          >
+            <LogOut size={18} />
+            Cerrar Sesión
+          </button>
+          {children}
+        </div>
       </div>
     </div>
   );

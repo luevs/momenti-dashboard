@@ -712,15 +712,15 @@ export default function ClientesLealtad() {
                     return (
                       <>
                         <div className="bg-blue-50 p-4 rounded-lg text-center">
-                          <p className="text-2xl font-bold text-blue-600">{stats.total}m</p>
+                          <p className="text-2xl font-bold text-blue-600">{Number(stats.total).toFixed(2)}m</p>
                           <p className="text-sm text-gray-600">Total consumido</p>
                         </div>
                         <div className="bg-green-50 p-4 rounded-lg text-center">
-                          <p className="text-2xl font-bold text-green-600">{stats.promedio}m</p>
+                          <p className="text-2xl font-bold text-green-600">{Number(stats.promedio).toFixed(2)}m</p>
                           <p className="text-sm text-gray-600">Promedio por pedido</p>
                         </div>
                         <div className="bg-purple-50 p-4 rounded-lg text-center">
-                          <p className="text-2xl font-bold text-purple-600">{stats.ultimoMes}m</p>
+                          <p className="text-2xl font-bold text-purple-600">{Number(stats.ultimoMes).toFixed(2)}m</p>
                           <p className="text-sm text-gray-600">Último mes</p>
                         </div>
                       </>
@@ -766,6 +766,37 @@ export default function ClientesLealtad() {
                           title="Enviar mensaje de WhatsApp"
                         >
                           WhatsApp
+                        </button>
+                      )}
+                      {idx === 0 && (
+                        <button
+                          onClick={() => {
+                            // Prepara los datos del ticket igual que en registrarPedido
+                            const ticketInfo = {
+                              client: {
+                                id: selectedClient.id,
+                                name: selectedClient.name,
+                                type: selectedClient.type,
+                                totalMeters: selectedClient.totalMeters,
+                                remainingMeters: selectedClient.remainingMeters,
+                                numeroWpp: selectedClient.numeroWpp
+                              },
+                              order: {
+                                metersConsumed: record.meters_consumed,
+                                registeredBy: record.recorded_by,
+                                observaciones: record.observaciones,
+                                recordedAt: record.recorded_at,
+                                folio: record.folio || Math.floor(Math.random() * 9999) + 1000
+                              }
+                            };
+                            setTicketData(ticketInfo);
+                            setTicketModalOpen(true);
+                          }}
+                          className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition mt-2 sm:mt-0"
+                          title="Imprimir Ticket"
+                        >
+                          <FileText size={16} />
+                          Imprimir Ticket
                         </button>
                       )}
                     </div>
