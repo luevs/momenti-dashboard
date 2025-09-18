@@ -4,6 +4,7 @@ import { supabase } from "../supabaseClient";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import SignatureCanvas from "react-signature-canvas";
+import LoyaltyTicket from "../components/LoyaltyTicket";
 
 // Colores para el estado
 const estadoColores = {
@@ -83,7 +84,20 @@ export default function ClientesLealtad() {
   const [globalHistory, setGlobalHistory] = useState([]);
   const [isLoadingGlobalHistory, setIsLoadingGlobalHistory] = useState(false);
 
+  // Estados para el modal de pedido mejorado
+  const [postPedidoModalOpen, setPostPedidoModalOpen] = useState(false);
+  const [ultimoPedidoGuardado, setUltimoPedidoGuardado] = useState(null);
+
   const [activeTab, setActiveTab] = useState("clientes"); // "clientes" o "historial"
+
+  // NUEVOS ESTADOS PARA EL TICKET
+  const [ticketModalOpen, setTicketModalOpen] = useState(false);
+  const [ticketData, setTicketData] = useState(null);
+
+  // Estados adicionales
+  const [signatureData, setSignatureData] = useState("");
+  const signatureRef = React.useRef();
+  const [autorizacionCliente, setAutorizacionCliente] = useState(false);
 
   // 1. Solo una función para traer todos los clientes
   const fetchClients = async () => {
@@ -213,22 +227,40 @@ export default function ClientesLealtad() {
           .delete()
           .eq('id', historyData[0].id);
       } else {
-        alert(`Pedido registrado correctamente. ${metros}m consumidos de ${selectedClient.name}`);
-        cerrarModal();
-        fetchClients();
+        // NUEVA LÓGICA - PREPARAR DATOS DEL TICKET
+        const ticketInfo = {
+          client: {
+            id: selectedClient.id,
+            name: selectedClient.name,
+            type: selectedClient.type,
+            totalMeters: selectedClient.totalMeters,
+            remainingMeters: newRemaining, // Metros después del pedido
+            numeroWpp: selectedClient.numeroWpp
+          },
+          order: {
+            metersConsumed: metros,
+            registeredBy: registeredBy.trim(),
+            observaciones: observaciones.trim(),
+            recordedAt: new Date().toISOString(),
+            folio: Math.floor(Math.random() * 9999) + 1000
+          }
+        };
 
-        // Enviar mensaje por WhatsApp si el número está disponible
-        if (selectedClient.numeroWpp) {
-          const numero = selectedClient.numeroWpp.replace(/\D/g, "");
-          const metrosRestantes = parseFloat((selectedClient.remainingMeters - metros).toFixed(2));
-          const metrosConsumidos = parseFloat(metros.toFixed(2));
-          // Para registrar pedido (en registrarPedido)
-          const fechaPedido = new Date().toLocaleDateString('es-MX');
-          const saludo = `Saludos ${selectedClient.name}\nLe informamos que su pedido de ${selectedClient.type} ya está listo para que pase por el.`;
-          const mensaje = `${saludo}\nEl día ${fechaPedido} consumiste ${metrosConsumidos} metros de tu programa de lealtad (${selectedClient.type}). Te quedan ${metrosRestantes} metros en tu plan. ¡Gracias por tu preferencia!`;
-          const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
-          window.open(url, "_blank");
-        }
+        // Guardado exitoso - preparar datos para ambos modales
+        setUltimoPedidoGuardado({
+          cliente: selectedClient,
+          metros: metros,
+          observaciones,
+          registradoPor: registeredBy,
+          fecha: new Date().toLocaleDateString('es-MX')
+        });
+
+        // PREPARAR DATOS DEL TICKET
+        setTicketData(ticketInfo);
+
+        cerrarModal();
+        setPostPedidoModalOpen(true);
+        fetchClients();
       }
     } catch (err) {
       console.error("Error inesperado en registrarPedido:", err);
@@ -458,10 +490,6 @@ export default function ClientesLealtad() {
     }
   };
 
-  const [signatureData, setSignatureData] = useState("");
-  const signatureRef = React.useRef();
-  const [autorizacionCliente, setAutorizacionCliente] = useState(false);
-
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -486,7 +514,7 @@ export default function ClientesLealtad() {
         </div>
       </div>
       
-      {/* SCORECARDS - Mueve este bloque aquí */}
+      {/* SCORECARDS */}
       <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="bg-blue-50 p-4 rounded-lg text-center">
           <p className="text-2xl font-bold text-blue-600">
@@ -552,8 +580,6 @@ export default function ClientesLealtad() {
           {showExpiringClients ? "Todos los Clientes" : "A punto de expirar"}
         </button>
       </div>
-
-      
 
       {/* MODAL MEJORADO para registrar pedido */}
       {modalOpen && (
@@ -629,7 +655,6 @@ export default function ClientesLealtad() {
                 </div>
               )}
 
-              {/* NUEVO CAMPO PARA FIRMA */}
               <div>
                 <label className="block text-gray-700 font-bold mb-2">
                   Autorización del cliente *
@@ -884,7 +909,6 @@ export default function ClientesLealtad() {
                 className="border rounded px-3 py-2 w-full"
               />
 
-              {/* NUEVOS CAMPOS */}
               <label className="block text-gray-700 font-bold">Razón de Edición *</label>
               <input
                 type="text"
@@ -1126,6 +1150,87 @@ export default function ClientesLealtad() {
           )}
         </div>
       )}
+
+      {/* MODAL POST PEDIDO CON OPCIÓN DE TICKET */}
+      {postPedidoModalOpen && ultimoPedidoGuardado && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
+          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-lg relative">
+            <button
+              onClick={() => setPostPedidoModalOpen(false)}
+              className="absolute top-3 right-3 text-gray-500 hover:text-black"
+            >
+              <X />
+            </button>
+            <h2 className="text-xl font-semibold mb-4 text-center text-green-600">
+              ¡Pedido Registrado Exitosamente!
+            </h2>
+            
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+              <p className="text-center">
+                <strong className="text-blue-800">{ultimoPedidoGuardado.cliente.name}</strong>
+              </p>
+              <p className="text-center text-blue-600">
+                <strong>{ultimoPedidoGuardado.metros}m</strong> consumidos de <strong>{ultimoPedidoGuardado.cliente.type}</strong>
+              </p>
+              <p className="text-sm text-center text-blue-500">
+                Registrado por: {ultimoPedidoGuardado.registradoPor}
+              </p>
+              {ultimoPedidoGuardado.observaciones && (
+                <p className="text-xs text-center text-gray-600 mt-2">
+                  Observaciones: {ultimoPedidoGuardado.observaciones}
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {/* Botón del Ticket */}
+              <button
+                className="bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition font-medium flex items-center justify-center gap-2"
+                onClick={() => {
+                  setPostPedidoModalOpen(false);
+                  setTicketModalOpen(true);
+                }}
+              >
+                <FileText size={18} />
+                Generar Ticket de Lealtad
+              </button>
+
+              {/* Botón de WhatsApp */}
+              <button
+                className="bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 transition font-medium"
+                onClick={() => {
+                  const numero = ultimoPedidoGuardado.cliente.numeroWpp?.replace(/\D/g, "");
+                  if (!numero) {
+                    alert("El cliente no tiene número de WhatsApp registrado.");
+                    return;
+                  }
+                  const saludo = `Saludos ${ultimoPedidoGuardado.cliente.name}\nLe informamos que su pedido de ${ultimoPedidoGuardado.cliente.type} ya está listo para que pase por el.`;
+                  const mensaje = `${saludo}\nEl día ${ultimoPedidoGuardado.fecha} consumiste ${ultimoPedidoGuardado.metros} metros de tu programa de lealtad (${ultimoPedidoGuardado.cliente.type}). Te quedan ${(ultimoPedidoGuardado.cliente.remainingMeters - ultimoPedidoGuardado.metros).toFixed(2)} metros en tu plan. Conserve su comprobante. ¡Gracias por tu preferencia!`;
+                  const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
+                  window.open(url, "_blank");
+                }}
+              >
+                Enviar WhatsApp
+              </button>
+
+              {/* Botón de cerrar */}
+              <button
+                className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition"
+                onClick={() => setPostPedidoModalOpen(false)}
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* COMPONENTE DEL TICKET */}
+      <LoyaltyTicket
+        isOpen={ticketModalOpen}
+        onClose={() => setTicketModalOpen(false)}
+        ticketData={ticketData}
+      />
     </div>
   );
 }

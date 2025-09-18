@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
+import { Package2 } from "lucide-react";
 import { LayoutDashboard, Printer, FileText, Settings, Users, BarChart2, Package, ClipboardList, Wrench } from "lucide-react";
 
 export default function Layout({ children }) {
@@ -6,10 +7,11 @@ export default function Layout({ children }) {
 
   const menuItems = [
     { path: "/", label: "Dashboard", icon: LayoutDashboard },
-    { path: "/impresoras", label: "Impresoras", icon: Printer },
+    { path: "/maquinas", label: "Maquinas", icon: Printer },
     { path: "/reportes", label: "Reportes", icon: BarChart2 },
     { path: "/clientes-lealtad", label: "Clientes Lealtad", icon: Users },
     { path: "/configuracion", label: "Configuración", icon: Settings },
+    { path: "/insumos", label: "Insumos", icon: Package2 },
   ];
 
   return (

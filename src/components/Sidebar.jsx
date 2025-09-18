@@ -6,7 +6,7 @@ export default function Sidebar() {
 
   const menuItems = [
     { name: "Dashboard", icon: LayoutDashboard, path: "/" },
-    { name: "Impresoras", icon: Printer, path: "/impresoras" },
+    { name: "Maquinas", icon: Printer, path: "/maquinas" },
     { name: "Reportes", icon: FileText, path: "/reportes" },
     { name: "Clientes Lealtad", icon: Users, path: "/clientes-lealtad" }, // Nuevo
     { name: "Configuración", icon: Settings, path: "/configuracion" },

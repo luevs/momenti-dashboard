@@ -1,5 +1,9 @@
-import { useState } from "react";
 import { Printer, Plus, X } from "lucide-react";
+import MaquinaCard from '../components/MaquinaCard';
+import React, { useState } from "react";
+import { supabase } from "../supabaseClient";
+import { useNavigate } from "react-router-dom";
+import MaquinaDetalle from "./MaquinaDetalle"; 
 
 const estadoColores = {
   activo: "bg-green-100 text-green-800",
@@ -7,7 +11,7 @@ const estadoColores = {
   cola: "bg-yellow-100 text-yellow-800",
 };
 
-export default function Impresoras() {
+export default function Maquinas() {
   const [impresoras, setImpresoras] = useState([
     { id: 1, nombre: "DTF 1 (Left)", estado: "activo", cola: 2 },
     { id: 2, nombre: "DTF 2 (Right)", estado: "inactivo", cola: 0 },
@@ -18,6 +22,8 @@ export default function Impresoras() {
   const [nuevaNombre, setNuevaNombre] = useState("");
   const [nuevoEstado, setNuevoEstado] = useState("activo");
   const [historial, setHistorial] = useState([]);
+
+  const navigate = useNavigate();
 
   const agregarImpresora = () => {
     const nueva = {
@@ -68,13 +74,22 @@ export default function Impresoras() {
         {impresoras.map((impresora) => (
           <div
             key={impresora.id}
-            className="p-4 bg-white shadow rounded-xl border border-gray-200"
+            className="p-4 bg-white shadow rounded-xl border border-gray-200 cursor-pointer hover:shadow-lg transition"
+            onClick={() => navigate(`/maquinas/${impresora.id}`)}
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-3">
                 <Printer className="text-blue-600" size={32} />
                 <div>
-                  <h2 className="font-semibold text-lg">{impresora.nombre}</h2>
+                  <h2
+                    className="font-semibold text-lg cursor-pointer hover:underline"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/maquinas/${impresora.id}`);
+                    }}
+                  >
+                    {impresora.nombre}
+                  </h2>
                   <span
                     className={`text-sm px-2 py-1 rounded-full ${estadoColores[impresora.estado]}`}
                   >
@@ -94,19 +109,28 @@ export default function Impresoras() {
             {/* Botones de estado */}
             <div className="mt-4 flex gap-2 flex-wrap">
               <button
-                onClick={() => cambiarEstado(impresora.id, "activo")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  cambiarEstado(impresora.id, "activo");
+                }}
                 className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded"
               >
                 Activar
               </button>
               <button
-                onClick={() => cambiarEstado(impresora.id, "cola")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  cambiarEstado(impresora.id, "cola");
+                }}
                 className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 rounded"
               >
                 En cola
               </button>
               <button
-                onClick={() => cambiarEstado(impresora.id, "inactivo")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  cambiarEstado(impresora.id, "inactivo");
+                }}
                 className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded"
               >
                 Apagar
@@ -173,7 +197,7 @@ export default function Impresoras() {
                 onClick={agregarImpresora}
                 className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
               >
-                Guardar
+                Agregar impresora
               </button>
             </div>
           </div>
