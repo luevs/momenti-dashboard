@@ -2,6 +2,14 @@ import React, { useState, useEffect } from "react";
 import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText, Package, AlertTriangle } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { useParams } from "react-router-dom";
+import { Bar } from 'react-chartjs-2'; // Si quieres usar Chart.js (opcional)
+
+function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 export default function MaquinaDetalle() {
   const { id } = useParams();
@@ -9,6 +17,8 @@ export default function MaquinaDetalle() {
   const [machineSupplies, setMachineSupplies] = useState([]);
   const [supplyTypes, setSupplyTypes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [productionRecords, setProductionRecords] = useState([]);
+  const [isLoadingProduction, setIsLoadingProduction] = useState(true);
   
   // Estados para modales
   const [restockModalOpen, setRestockModalOpen] = useState(false);
@@ -34,6 +44,8 @@ export default function MaquinaDetalle() {
   const [corteOperador, setCorteOperador] = useState("");
   const [corteError, setCorteError] = useState("");
   const [corteTotalMes, setCorteTotalMes] = useState(0);
+  const [activeTab, setActiveTab] = useState("insumos"); // "insumos" o "historial"
+  
 
   // --- HANDLERS PARA MODALES DE EDITAR Y ELIMINAR ---
 
@@ -73,6 +85,58 @@ export default function MaquinaDetalle() {
   const [initialStock, setInitialStock] = useState("");
   const [minimumLevel, setMinimumLevel] = useState("");
   const [criticalLevel, setCriticalLevel] = useState("");
+
+  // Nuevo estado para editar registros de producción
+  const [editRecordModalOpen, setEditRecordModalOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState(null);
+  const [editDate, setEditDate] = useState(getLocalDateString());
+  const [editMeters, setEditMeters] = useState("");
+  const [editRegisteredBy, setEditRegisteredBy] = useState("");
+  const [editError, setEditError] = useState("");
+
+  // Handlers para editar registros de producción
+  const openEditRecord = (record) => {
+    setEditingRecord(record);
+    const dateStr = typeof record.date === "string" ? record.date.slice(0,10) : getLocalDateString(new Date(record.date));
+    setEditDate(dateStr);
+    setEditMeters(String(record.meters_printed ?? ""));
+    setEditRegisteredBy(record.registered_by ?? "");
+    setEditError("");
+    setEditRecordModalOpen(true);
+  };
+
+  const closeEditRecordModal = () => {
+    setEditRecordModalOpen(false);
+    setEditingRecord(null);
+    setEditDate(getLocalDateString());
+    setEditMeters("");
+    setEditRegisteredBy("");
+    setEditError("");
+  };
+
+  const handleUpdateRecord = async () => {
+    if (!editingRecord) return;
+    if (!editDate) { setEditError("Selecciona una fecha."); return; }
+    if (!editMeters || isNaN(Number(editMeters))) { setEditError("Ingresa metros válidos."); return; }
+
+    try {
+      const { error } = await supabase
+        .from('machine_daily_prints')
+        .update({
+          date: editDate,
+          meters_printed: Number(editMeters),
+          registered_by: editRegisteredBy || null
+        })
+        .eq('id', editingRecord.id);
+
+      if (error) { setEditError(error.message || "Error al actualizar"); return; }
+
+      setProductionRecords(prev => prev.map(r => r.id === editingRecord.id ? { ...r, date: editDate, meters_printed: Number(editMeters), registered_by: editRegisteredBy } : r));
+      closeEditRecordModal();
+    } catch (err) {
+      setEditError(err.message || "Error al actualizar");
+    }
+  };
 
   // Cargar datos iniciales
   useEffect(() => {
@@ -125,6 +189,22 @@ export default function MaquinaDetalle() {
     } else {
       setMachineSupplies(data || []);
     }
+  };
+
+  useEffect(() => {
+    fetchProductionRecords();
+  }, [id]);
+
+  const fetchProductionRecords = async () => {
+    setIsLoadingProduction(true);
+    const { data, error } = await supabase
+      .from('machine_daily_prints')
+      .select('*')
+      .eq('machine_id', id)
+      .order('date', { ascending: false })
+      .limit(31); // Último mes
+    if (!error) setProductionRecords(data || []);
+    setIsLoadingProduction(false);
   };
 
   // Obtener insumos de la máquina activa
@@ -430,6 +510,43 @@ export default function MaquinaDetalle() {
   const stats = getGeneralStats();
   const currentSupplies = getCurrentMachineSupplies();
 
+  // --- CÁLCULOS PARA ESTADÍSTICAS SEMANALES Y MENSUALES ---
+const today = new Date();
+const yesterday = new Date(today);
+yesterday.setDate(today.getDate() - 1);
+
+const todayStr = getLocalDateString();
+const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
+
+const getMetersByDate = (dateStr) =>
+  productionRecords
+    .filter(r => (typeof r.date === "string" ? r.date.slice(0, 10) : getLocalDateString(new Date(r.date))) === dateStr)
+    .reduce((sum, r) => sum + Number(r.meters_printed), 0);
+
+const getMetersThisWeek = () => {
+  const startOfWeek = new Date(today);
+  startOfWeek.setDate(today.getDate() - today.getDay());
+  return productionRecords
+    .filter(r => new Date(r.date) >= startOfWeek)
+    .reduce((sum, r) => sum + Number(r.meters_printed), 0);
+};
+
+const getMetersThisMonth = () => {
+  const month = today.getMonth();
+  const year = today.getFullYear();
+  return productionRecords
+    .filter(r => {
+      const d = new Date(r.date);
+      return d.getMonth() === month && d.getFullYear() === year;
+    })
+    .reduce((sum, r) => sum + Number(r.meters_printed), 0);
+};
+
+const getMetersYesterday = () => getMetersByDate(yesterday.toISOString().slice(0,10));
+const getMetersToday = () => getMetersByDate(today.toISOString().slice(0,10));
+const getMetersTotal = () =>
+  productionRecords.reduce((sum, r) => sum + Number(r.meters_printed), 0);
+
   if (isLoading) {
     return (
       <div className="p-6">
@@ -440,8 +557,31 @@ export default function MaquinaDetalle() {
 
   return (
     <div className="p-6">
+      
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-blue-50 p-4 rounded-lg text-center">
+          <p className="text-2xl font-bold text-blue-600">{getMetersToday().toFixed(2)} m</p>
+          <p className="text-sm text-gray-600">Metros Hoy</p>
+        </div>
+        <div className="bg-yellow-50 p-4 rounded-lg text-center">
+          <p className="text-2xl font-bold text-yellow-600">{getMetersYesterday().toFixed(2)} m</p>
+          <p className="text-sm text-gray-600">Metros Ayer</p>
+        </div>
+        <div className="bg-green-50 p-4 rounded-lg text-center">
+          <p className="text-2xl font-bold text-green-600">{getMetersThisWeek().toFixed(2)} m</p>
+          <p className="text-sm text-gray-600">Semana Actual</p>
+        </div>
+        <div className="bg-purple-50 p-4 rounded-lg text-center">
+          <p className="text-2xl font-bold text-purple-600">{getMetersThisMonth().toFixed(2)} m</p>
+          <p className="text-sm text-gray-600">Mes Actual</p>
+        </div>
+      </div>
+
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Control de Insumos</h1>
+        <h1 className="text-2xl font-bold">
+          {machines?.find(m => String(m.id) === String(id))?.name || "Detalle de Máquina"}
+        </h1>
         <div className="flex gap-2">
           <button
             onClick={() => {
@@ -466,29 +606,26 @@ export default function MaquinaDetalle() {
           </button>
         </div>
       </div>
-      
-      {/* Stats Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="bg-green-50 p-4 rounded-lg text-center">
-          <p className="text-2xl font-bold text-green-600">{stats.activeMachines}</p>
-          <p className="text-sm text-gray-600">Máquinas Activas</p>
-        </div>
-        <div className="bg-red-50 p-4 rounded-lg text-center">
-          <p className="text-2xl font-bold text-red-600">{stats.critical}</p>
-          <p className="text-sm text-gray-600">Críticos</p>
-        </div>
-        <div className="bg-yellow-50 p-4 rounded-lg text-center">
-          <p className="text-2xl font-bold text-yellow-600">{stats.alerts}</p>
-          <p className="text-sm text-gray-600">Alertas Totales</p>
-        </div>
-        <div className="bg-blue-50 p-4 rounded-lg text-center">
-          <p className="text-2xl font-bold text-blue-600">{stats.total}</p>
-          <p className="text-sm text-gray-600">Insumos Monitoreados</p>
-        </div>
+
+      {/* Tabs */}
+      <div className="flex gap-4 mb-6 border-b">
+        <button
+          className={`pb-2 px-4 font-semibold border-b-2 ${activeTab === "insumos" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500"}`}
+          onClick={() => setActiveTab("insumos")}
+        >
+          Control de Insumos
+        </button>
+        <button
+          className={`pb-2 px-4 font-semibold border-b-2 ${activeTab === "historial" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500"}`}
+          onClick={() => setActiveTab("historial")}
+        >
+          Historial de Metros
+        </button>
       </div>
 
         {/* Contenido de la máquina seleccionada */}
-        <div className="space-y-4">
+        {activeTab === "insumos" && (
+          <div className="space-y-4">
           <h3 className="text-lg font-semibold flex items-center gap-2">
             <Package className="text-blue-600" size={24} />
             Insumos de {selectedMachine?.name || ""}
@@ -568,8 +705,41 @@ export default function MaquinaDetalle() {
             </div>
           )}
         </div>
+        )}
 
-
+        {activeTab === "historial" && (
+          <div>
+            <h2 className="text-xl font-bold mb-4">Historial de Metros Impresos</h2>
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="px-4 py-2 text-left">Fecha</th>
+                  <th className="px-4 py-2 text-left">Metros impresos</th>
+                  <th className="px-4 py-2 text-left">Registrado por</th>
+                  <th className="px-4 py-2 text-left">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productionRecords.map(r => (
+                  <tr key={r.id} className="border-b">
+                    <td className="px-4 py-2">{r.date.slice(0,10)}</td>
+                    <td className="px-4 py-2">{Number(r.meters_printed).toFixed(2)} m</td>
+                    <td className="px-4 py-2">{r.registered_by || '-'}</td>
+                    <td className="px-4 py-2">
+                      {/* Aquí puedes poner un botón para editar */}
+                      <button
+                        className="text-blue-600 hover:underline"
+                        onClick={() => openEditRecord(r)}
+                      >
+                        Editar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       {/* MODAL DE REPOSICIÓN */}
       {restockModalOpen && selectedSupply && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
@@ -696,6 +866,73 @@ export default function MaquinaDetalle() {
               >
                 Actualizar Stock
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE EDICIÓN DE REGISTRO DE METROS */}
+      {editRecordModalOpen && editingRecord && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
+          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-lg relative">
+            <button
+              onClick={closeEditRecordModal}
+              className="absolute top-3 right-3 text-gray-500 hover:text-black"
+            >
+              <X />
+            </button>
+
+            <h2 className="text-xl font-semibold mb-4">Editar registro de {selectedMachine?.name || "máquina"}</h2>
+
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">Fecha</label>
+                <input
+                  type="date"
+                  value={editDate}
+                  onChange={e => setEditDate(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">Metros impresos</label>
+                <input
+                  type="number"
+                  value={editMeters}
+                  onChange={e => setEditMeters(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">Registrado por</label>
+                <input
+                  type="text"
+                  value={editRegisteredBy}
+                  onChange={e => setEditRegisteredBy(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                />
+              </div>
+
+              {editError && <div className="text-red-600 text-sm">{editError}</div>}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleUpdateRecord}
+                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex-1"
+                >
+                  Guardar cambios
+                </button>
+                <button
+                  onClick={closeEditRecordModal}
+                  className="bg-gray-200 text-gray-800 px-4 py-2 rounded hover:bg-gray-300"
+                >
+                  Cancelar
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -963,7 +1200,7 @@ export default function MaquinaDetalle() {
                   })
                   .eq('id', editingSupply.id);
                 if (error) {
-                  alert("Error al guardar razón de eliminación: " + error.message);
+                  alert("Error al guardar razón de eliminación: " + error.message); className="bg-red-600 text"
                   return;
                 }
                 // Ahora sí elimina
@@ -979,7 +1216,6 @@ export default function MaquinaDetalle() {
                   fetchMachineSupplies();
                 }
               }}
-              className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
             >
               Confirmar eliminación
             </button>
@@ -1015,6 +1251,7 @@ export default function MaquinaDetalle() {
                 <label className="block text-gray-700 font-bold mb-2">Metros impresos *</label>
                 <input
                   type="number"
+                  placeholder="Cantidad de metros impresos"
                   value={corteMetros}
                   onChange={e => setCorteMetros(e.target.value)}
                   className="border rounded px-3 py-2 w-full"
@@ -1039,61 +1276,130 @@ export default function MaquinaDetalle() {
                   <option value="Operador 3">Operador 3</option>
                 </select>
               </div>
-              <div className="bg-blue-50 p-3 rounded text-sm">
-                <strong>Total del mes:</strong> {corteTotalMes} m
-              </div>
+              
               {corteError && <div className="text-red-600 text-sm">{corteError}</div>}
+              
               <button
-                className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600"
                 onClick={async () => {
-                  setCorteError("");
                   if (!corteMetros || parseFloat(corteMetros) <= 0) {
-                    setCorteError("Ingresa los metros impresos.");
+                    setCorteError("Ingresa una cantidad válida de metros.");
                     return;
                   }
                   if (!corteOperador) {
                     setCorteError("Selecciona el operador.");
                     return;
                   }
-                  // Busca la máquina activa
-                  const maquina = machines.find(m => m.name === activeTab);
-                  if (!maquina) {
-                    setCorteError("No se encontró la máquina activa.");
-                    return;
-                  }
-                  // Valida que no exista ya un corte para esa fecha y máquina
-                  const { data: existente, error: errorExistente } = await supabase
+                  
+                  // Verificar si ya existe un corte para esta fecha y máquina
+                  const { data: existente, error: existenteError } = await supabase
                     .from('production_records')
                     .select('id')
-                    .eq('machine_id', maquina.id)
+                    .eq('machine_id', selectedMachine.id)
                     .eq('date', corteFecha);
+                  if (existenteError) {
+                    setCorteError("Error al verificar corte existente: " + existenteError.message);
+                    return;
+                  }
                   if (existente && existente.length > 0) {
                     setCorteError("Ya existe un corte para esta máquina y fecha.");
                     return;
                   }
-                  // Inserta el corte
-                  const { error } = await supabase
-                    .from('production_records')
-                    .insert([{
-                      machine_id: selectedMachine.id,
-                      date: corteFecha,
-                      meters_produced: parseFloat(corteMetros),
-                      recorded_by: corteOperador
-                    }]);
-                  if (error) {
-                    setCorteError("Error al guardar el corte: " + error.message);
-                  } else {
-                    setCorteModalOpen(false);
-                    setCorteMetros("");
-                    setCorteOperador("");
-                    setCorteError("");
-                    calcularTotalMes();
+
+                  try {
+                    // Inserta el corte
+                    const { error } = await supabase
+                      .from('production_records')
+                      .insert([{
+                        machine_id: selectedMachine.id,
+                        date: getLocalDateString(new Date()),
+                        meters_printed: Number(metrosHoy),
+                        registered_by: localStorage.getItem('currentUser') || 'Sistema'
+                      }]);
+                    if (error) {
+                      setCorteError("Error al guardar el corte: " + error.message);
+                      return;
+                    }
                     alert("¡Corte diario registrado correctamente!");
+                    calcularTotalMes();
+                    setCorteError("");
+                    setCorteOperador("");
+                    setCorteMetros("");
+                    setCorteModalOpen(false);
+                  } catch (error) {
+                    setCorteError("Error al guardar el corte: " + error.message);
                   }
                 }}
+                className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600"
               >
                 Guardar Corte Diario
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE EDICIÓN DE REGISTROS */}
+      {editRecordModalOpen && editingRecord && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
+          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-lg relative">
+            <button
+              onClick={closeEditRecordModal}
+              className="absolute top-3 right-3 text-gray-500 hover:text-black"
+            >
+              <X />
+            </button>
+
+            <h2 className="text-xl font-semibold mb-4">Editar registro de {selectedMachine?.name || "máquina"}</h2>
+
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">Fecha</label>
+                <input
+                  type="date"
+                  value={editDate}
+                  onChange={e => setEditDate(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">Metros impresos</label>
+                <input
+                  type="number"
+                  value={editMeters}
+                  onChange={e => setEditMeters(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">Registrado por</label>
+                <input
+                  type="text"
+                  value={editRegisteredBy}
+                  onChange={e => setEditRegisteredBy(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                />
+              </div>
+
+              {editError && <div className="text-red-600 text-sm">{editError}</div>}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleUpdateRecord}
+                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex-1"
+                >
+                  Guardar cambios
+                </button>
+                <button
+                  onClick={closeEditRecordModal}
+                  className="bg-gray-200 text-gray-800 px-4 py-2 rounded hover:bg-gray-300"
+                >
+                  Cancelar
+                </button>
+              </div>
             </div>
           </div>
         </div>

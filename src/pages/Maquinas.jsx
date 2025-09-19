@@ -1,6 +1,6 @@
 import { Printer, Plus, X } from "lucide-react";
 import MaquinaCard from '../components/MaquinaCard';
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 import { useNavigate } from "react-router-dom";
 import MaquinaDetalle from "./MaquinaDetalle"; 
@@ -22,6 +22,13 @@ export default function Maquinas() {
   const [nuevaNombre, setNuevaNombre] = useState("");
   const [nuevoEstado, setNuevoEstado] = useState("activo");
   const [historial, setHistorial] = useState([]);
+  const [registroModalOpen, setRegistroModalOpen] = useState(false);
+  const [metrosHoy, setMetrosHoy] = useState("");
+  const [impresoraSeleccionada, setImpresoraSeleccionada] = useState(null);
+  const [corteModalOpen, setCorteModalOpen] = useState(false);
+  const [corteMetros, setCorteMetros] = useState({}); // { [machineId]: metros }
+  const [corteFecha, setCorteFecha] = useState(new Date().toISOString().slice(0,10));
+  const [registroFecha, setRegistroFecha] = useState(new Date().toISOString().slice(0, 10));
 
   const navigate = useNavigate();
 
@@ -57,17 +64,73 @@ export default function Maquinas() {
     setHistorial([...historial, nuevoEvento]);
   };
 
+  // Función para guardar en Supabase
+  const registrarMetros = async () => {
+    if (!metrosHoy || isNaN(Number(metrosHoy))) {
+      alert("Ingresa una cantidad válida de metros.");
+      return;
+    }
+    const { error } = await supabase
+      .from('machine_daily_prints')
+      .insert([{
+        machine_id: impresoraSeleccionada.id,
+        date: registroFecha, // Usa la fecha seleccionada
+        meters_printed: Number(metrosHoy),
+        registered_by: localStorage.getItem('currentUser') || 'Sistema'
+      }]);
+    if (error) {
+      alert("Error al registrar: " + error.message);
+    } else {
+      alert("Registro guardado");
+      setRegistroModalOpen(false);
+      setMetrosHoy("");
+      setImpresoraSeleccionada(null);
+    }
+  };
+
+  // Nuevo: Guardar corte diario para todas las máquinas
+  const registrarCorteDiario = async () => {
+    const registros = impresoras
+      .filter((imp) => corteMetros[imp.id] && !isNaN(Number(corteMetros[imp.id])))
+      .map((imp) => ({
+        machine_id: imp.id,
+        date: corteFecha,
+        meters_printed: Number(corteMetros[imp.id]),
+        registered_by: localStorage.getItem('currentUser') || 'Sistema'
+      }));
+    if (registros.length === 0) {
+      alert("Ingresa al menos un valor válido de metros.");
+      return;
+    }
+    const { error } = await supabase.from('machine_daily_prints').insert(registros);
+    if (error) {
+      alert("Error al registrar: " + error.message);
+    } else {
+      alert("Corte diario guardado");
+      setCorteModalOpen(false);
+      setCorteMetros({});
+    }
+  };
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Impresoras</h1>
-        <button
-          onClick={() => setModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-        >
-          <Plus size={18} />
-          Agregar impresora
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setCorteModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition"
+          >
+            Corte Diario
+          </button>
+          <button
+            onClick={() => setModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+          >
+            <Plus size={18} />
+            Agregar impresora
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
@@ -137,31 +200,67 @@ export default function Maquinas() {
               </button>
             </div>
 
-            {/* Historial */}
-            <div className="mt-4">
-              <h4 className="text-sm font-semibold">Historial:</h4>
-              <ul className="text-xs text-gray-500 max-h-24 overflow-y-auto mt-1 space-y-1">
-                {historial
-                  .filter((h) => h.impresoraId === impresora.id)
-                  .slice(-5)
-                  .reverse()
-                  .map((evento) => (
-                    <li key={evento.id}>
-                      {evento.timestamp} →{" "}
-                      <strong>
-                        {evento.nuevoEstado === "activo"
-                          ? "Activa"
-                          : evento.nuevoEstado === "inactivo"
-                          ? "Inactiva"
-                          : "En cola"}
-                      </strong>
-                    </li>
-                  ))}
-              </ul>
-            </div>
+            {/* Botón para registrar metros */}
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                setImpresoraSeleccionada(impresora);
+                setRegistroModalOpen(true);
+                setMetrosHoy("");
+                setRegistroFecha(new Date().toISOString().slice(0, 10)); // Nuevo: fecha por defecto hoy
+              }}
+              className="mt-3 px-3 py-1 bg-blue-100 text-blue-800 rounded hover:bg-blue-200 text-xs"
+            >
+              Registrar Metros
+            </button>
           </div>
         ))}
       </div>
+
+      {/* MODAL DE CORTE DIARIO */}
+      {corteModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
+          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-lg relative">
+            <button
+              onClick={() => setCorteModalOpen(false)}
+              className="absolute top-3 right-3 text-gray-500 hover:text-black"
+            >
+              <X />
+            </button>
+            <h2 className="text-xl font-semibold mb-4">Corte Diario de Metros Impresos</h2>
+            <div className="mb-4">
+              <label className="block text-gray-700 font-bold mb-2">Fecha</label>
+              <input
+                type="date"
+                value={corteFecha}
+                onChange={e => setCorteFecha(e.target.value)}
+                className="border rounded px-3 py-2 w-full"
+              />
+            </div>
+            <div className="flex flex-col gap-3">
+              {impresoras.map((imp) => (
+                <div key={imp.id}>
+                  <label className="block text-gray-700 font-semibold mb-1">{imp.nombre}</label>
+                  <input
+                    type="number"
+                    placeholder="Metros impresos"
+                    value={corteMetros[imp.id] || ""}
+                    onChange={e => setCorteMetros({ ...corteMetros, [imp.id]: e.target.value })}
+                    className="border rounded px-3 py-2 w-full"
+                    min="0"
+                  />
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={registrarCorteDiario}
+              className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 w-full mt-4"
+            >
+              Guardar Corte Diario
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* MODAL */}
       {modalOpen && (
@@ -200,6 +299,46 @@ export default function Maquinas() {
                 Agregar impresora
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE REGISTRO DE METROS */}
+      {registroModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
+          <div className="bg-white p-6 rounded-xl w-full max-w-xs shadow-lg relative">
+            <button
+              onClick={() => setRegistroModalOpen(false)}
+              className="absolute top-3 right-3 text-gray-500 hover:text-black"
+            >
+              <X />
+            </button>
+            <h2 className="text-lg font-semibold mb-4">
+              Registrar metros para {impresoraSeleccionada?.nombre}
+            </h2>
+            <div className="mb-3">
+              <label className="block text-gray-700 font-bold mb-1">Fecha</label>
+              <input
+                type="date"
+                value={registroFecha}
+                onChange={e => setRegistroFecha(e.target.value)}
+                className="border rounded px-3 py-2 w-full"
+              />
+            </div>
+            <input
+              type="number"
+              placeholder="Metros impresos"
+              value={metrosHoy}
+              onChange={e => setMetrosHoy(e.target.value)}
+              className="border rounded px-3 py-2 w-full mb-4"
+              min="0"
+            />
+            <button
+              onClick={registrarMetros}
+              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full"
+            >
+              Guardar registro
+            </button>
           </div>
         </div>
       )}
