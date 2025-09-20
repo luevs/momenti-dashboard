@@ -11,6 +11,14 @@ const estadoColores = {
   cola: "bg-yellow-100 text-yellow-800",
 };
 
+// helper: fecha local YYYY-MM-DD
+function getLocalDateString(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export default function Maquinas() {
   const [impresoras, setImpresoras] = useState([
     { id: 1, nombre: "DTF 1 (Left)", estado: "activo", cola: 2 },
@@ -29,8 +37,37 @@ export default function Maquinas() {
   const [corteMetros, setCorteMetros] = useState({}); // { [machineId]: metros }
   const [corteFecha, setCorteFecha] = useState(new Date().toISOString().slice(0,10));
   const [registroFecha, setRegistroFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [latestRecords, setLatestRecords] = useState({}); // { [machineId]: { date, meters_printed, registered_by } }
 
   const navigate = useNavigate();
+
+  // fetch latest records for the current impresoras
+  const fetchLatestRecords = async () => {
+    try {
+      const ids = impresoras.map(i => i.id);
+      if (!ids.length) { setLatestRecords({}); return; }
+      const { data, error } = await supabase
+        .from('machine_daily_prints')
+        .select('machine_id, date, meters_printed, registered_by')
+        .in('machine_id', ids)
+        .order('date', { ascending: false });
+      if (error) {
+        console.error('fetchLatestRecords error', error);
+        return;
+      }
+      const map = {};
+      (data || []).forEach(r => {
+        if (!map[r.machine_id]) map[r.machine_id] = r; // keep first (latest) per machine
+      });
+      setLatestRecords(map);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    fetchLatestRecords();
+  }, [impresoras]);
 
   const agregarImpresora = () => {
     const nueva = {
@@ -70,17 +107,20 @@ export default function Maquinas() {
       alert("Ingresa una cantidad válida de metros.");
       return;
     }
+    const payload = {
+      machine_id: impresoraSeleccionada.id,
+      date: registroFecha,
+      meters_printed: Number(metrosHoy),
+      registered_by: localStorage.getItem('currentUser') || 'Sistema'
+    };
     const { error } = await supabase
       .from('machine_daily_prints')
-      .insert([{
-        machine_id: impresoraSeleccionada.id,
-        date: registroFecha, // Usa la fecha seleccionada
-        meters_printed: Number(metrosHoy),
-        registered_by: localStorage.getItem('currentUser') || 'Sistema'
-      }]);
+      .upsert([payload], { onConflict: ['machine_id', 'date'] }); // upsert evita duplicados por machine+date
     if (error) {
       alert("Error al registrar: " + error.message);
     } else {
+      // actualizar UI localmente
+      setLatestRecords(prev => ({ ...prev, [impresoraSeleccionada.id]: payload }));
       alert("Registro guardado");
       setRegistroModalOpen(false);
       setMetrosHoy("");
@@ -134,87 +174,57 @@ export default function Maquinas() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-        {impresoras.map((impresora) => (
-          <div
-            key={impresora.id}
-            className="p-4 bg-white shadow rounded-xl border border-gray-200 cursor-pointer hover:shadow-lg transition"
-            onClick={() => navigate(`/maquinas/${impresora.id}`)}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-3">
-                <Printer className="text-blue-600" size={32} />
-                <div>
-                  <h2
-                    className="font-semibold text-lg cursor-pointer hover:underline"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigate(`/maquinas/${impresora.id}`);
-                    }}
+        {impresoras.map((impresora) => {
+          const last = latestRecords[impresora.id];
+          const registeredToday = last && String(last.date).slice(0,10) === getLocalDateString();
+          return (
+            <div
+              key={impresora.id}
+              className="p-4 bg-white shadow rounded-xl border border-gray-200 transition"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-3">
+                  <Printer className="text-blue-600" size={32} />
+                  <div>
+                    <h2 className="font-semibold text-lg">{impresora.nombre}</h2>
+                    <p className="text-sm text-gray-500 mt-1">
+                      {last
+                        ? <>Último: <strong>{Number(last.meters_printed).toFixed(2)} m</strong> — {String(last.date).slice(0,10)}</>
+                        : <>Sin registros</>
+                      }
+                    </p>
+                  </div>
+                </div>
+
+                {/* indicador pequeño */}
+                <div className="flex flex-col items-end">
+                  <span className={`w-3 h-3 rounded-full ${registeredToday ? 'bg-green-500' : 'bg-red-400'}`} title={registeredToday ? 'Registrado hoy' : 'No registrado hoy'}></span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); navigate(`/maquinas/${impresora.id}`); }}
+                    className="text-xs text-blue-600 mt-2 hover:underline"
                   >
-                    {impresora.nombre}
-                  </h2>
-                  <span
-                    className={`text-sm px-2 py-1 rounded-full ${estadoColores[impresora.estado]}`}
-                  >
-                    {impresora.estado === "activo"
-                      ? "Activa"
-                      : impresora.estado === "inactivo"
-                      ? "Inactiva"
-                      : "En cola"}
-                  </span>
+                    Ver Historial
+                  </button>
                 </div>
               </div>
-            </div>
-            <p className="text-sm text-gray-500 mt-2">
-              Trabajos en cola: <strong>{impresora.cola}</strong>
-            </p>
 
-            {/* Botones de estado */}
-            <div className="mt-4 flex gap-2 flex-wrap">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  cambiarEstado(impresora.id, "activo");
-                }}
-                className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded"
-              >
-                Activar
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  cambiarEstado(impresora.id, "cola");
-                }}
-                className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 rounded"
-              >
-                En cola
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  cambiarEstado(impresora.id, "inactivo");
-                }}
-                className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded"
-              >
-                Apagar
-              </button>
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    setImpresoraSeleccionada(impresora);
+                    setRegistroModalOpen(true);
+                    setMetrosHoy("");
+                    setRegistroFecha(getLocalDateString());
+                  }}
+                  className="flex-1 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                >
+                  Registrar Metros
+                </button>
+              </div>
             </div>
-
-            {/* Botón para registrar metros */}
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                setImpresoraSeleccionada(impresora);
-                setRegistroModalOpen(true);
-                setMetrosHoy("");
-                setRegistroFecha(new Date().toISOString().slice(0, 10)); // Nuevo: fecha por defecto hoy
-              }}
-              className="mt-3 px-3 py-1 bg-blue-100 text-blue-800 rounded hover:bg-blue-200 text-xs"
-            >
-              Registrar Metros
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* MODAL DE CORTE DIARIO */}

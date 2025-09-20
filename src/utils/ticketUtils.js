@@ -34,7 +34,10 @@ export const getProgramStatus = (remainingMeters, totalMeters) => {
 };
 
 // Función principal para generar el HTML del ticket
-export const generateTicketHTML = (ticketData, signatureDataURL) => {
+// Generate the ticket HTML. Accept an optional logoUrl so callers can pass
+// an absolute URL or a data URL when root-relative paths ("/momenti-logo.jpg")
+// don't resolve in the printing context (e.g. blob/window.open/data URLs).
+export const generateTicketHTML = (ticketData, signatureDataURL, logoUrl = '/momenti-logo.jpg') => {
   const { client, order } = ticketData;
   const currentDateTime = getCurrentDateTime();
   const remainingAfterOrder = client.remainingMeters;
@@ -153,8 +156,8 @@ export const generateTicketHTML = (ticketData, signatureDataURL) => {
         </style>
       </head>
       <body>
-        <!-- Logo -->
-        <img src="/momenti-logo.jpg" alt="Momenti Logo" class="logo" />
+  <!-- Logo -->
+  <img src="${logoUrl}" alt="Momenti Logo" class="logo" />
         
         <!-- Header -->
         <div class="header">
