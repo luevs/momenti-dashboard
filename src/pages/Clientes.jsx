@@ -26,9 +26,12 @@ export default function Clientes() {
   const [newStatus, setNewStatus] = useState("active");
   const [newPhone, setNewPhone] = useState("");
 
-  // Nuevo: ancho de la lista (en px)
-  const [listWidth, setListWidth] = useState(340);
+  // Estados para el redimensionamiento dinámico
+  const [listWidth, setListWidth] = useState(400);
   const draggingRef = useRef(false);
+  const containerRef = useRef(null);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
 
   useEffect(() => {
     // carga mock (en futuro reemplazar por fetch)
@@ -57,36 +60,65 @@ export default function Clientes() {
     setSelectedId(id);
   };
 
-  // Nuevo: handlers para drag
+  // Handlers para el redimensionamiento
   const handleMouseDown = (e) => {
+    e.preventDefault();
     draggingRef.current = true;
+    startXRef.current = e.clientX;
+    startWidthRef.current = listWidth;
     document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  const handleMouseMove = (e) => {
+    if (!draggingRef.current || !containerRef.current) return;
+    
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const containerWidth = containerRect.width;
+    const deltaX = e.clientX - startXRef.current;
+    const newWidth = startWidthRef.current + deltaX;
+    
+    // Límites: mínimo 250px, máximo 70% del contenedor
+    const minWidth = 250;
+    const maxWidth = containerWidth * 0.7;
+    
+    const clampedWidth = Math.max(minWidth, Math.min(newWidth, maxWidth));
+    setListWidth(clampedWidth);
+  };
+
+  const handleMouseUp = () => {
+    if (draggingRef.current) {
+      draggingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
   };
 
   useEffect(() => {
-    const onMove = (e) => {
-      if (!draggingRef.current) return;
-      setListWidth(Math.max(220, Math.min(e.clientX, 600)));
-    };
-    const onUp = () => {
-      if (draggingRef.current) {
-        draggingRef.current = false;
-        document.body.style.cursor = "";
-      }
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
       document.body.style.cursor = "";
+      document.body.style.userSelect = "";
     };
-  }, []);
+  }, [listWidth]);
+
+  // Función para resetear el tamaño
+  const resetLayout = () => {
+    setListWidth(400);
+  };
 
   return (
-    <div className="p-6 flex gap-0 relative select-none">
+    <div className="p-6 flex gap-0 relative select-none h-full" ref={containerRef}>
       {/* Lista de clientes */}
-      <div style={{ width: listWidth }} className="transition-all duration-100 bg-transparent">
+      <div 
+        style={{ width: `${listWidth}px` }} 
+        className="flex-shrink-0 bg-white rounded-l-lg border border-r-0 border-gray-200 overflow-hidden"
+      >
+        <div className="p-4 h-full flex flex-col">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-xl font-semibold">Clientes</h1>
           <div className="flex items-center gap-2">
@@ -107,7 +139,7 @@ export default function Clientes() {
           </select>
         </div>
 
-        <div className="space-y-2">
+          <div className="flex-1 overflow-y-auto space-y-2">
           {filtered.map(c => (
             <div key={c.id} onClick={() => setSelectedId(c.id)} className="cursor-pointer">
               <CustomerCard customer={c} active={c.id === selectedId} metric={metric} />
@@ -115,22 +147,45 @@ export default function Clientes() {
           ))}
           {filtered.length === 0 && <div className="text-sm text-gray-500">No hay clientes</div>}
         </div>
+        </div>
       </div>
 
       {/* Separador draggable */}
       <div
         onMouseDown={handleMouseDown}
-        className="w-2 cursor-col-resize bg-gray-200 hover:bg-blue-300 transition"
+        className="w-1 cursor-col-resize bg-gray-300 hover:bg-blue-400 transition-colors duration-200 relative group flex-shrink-0"
         style={{ zIndex: 10 }}
         title="Arrastra para redimensionar"
-      />
+      >
+        {/* Indicador visual */}
+        <div className="absolute inset-y-0 left-0 w-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
+        
+        {/* Botón de reset (aparece al hacer hover) */}
+        <button
+          onClick={resetLayout}
+          className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 
+                     bg-gray-600 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 
+                     transition-opacity duration-200 whitespace-nowrap z-20"
+          title="Resetear tamaño"
+        >
+          Reset
+        </button>
+      </div>
 
       {/* Panel detalle */}
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 bg-white rounded-r-lg border border-l-0 border-gray-200">
         {selectedId ? (
-          <CustomerDetail customerId={selectedId} onClose={() => setSelectedId(null)} />
+          <div className="h-full">
+            <CustomerDetail customerId={selectedId} onClose={() => setSelectedId(null)} />
+          </div>
         ) : (
-          <div className="p-8 bg-white border rounded text-gray-500">Selecciona un cliente para ver detalles</div>
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center text-gray-500">
+              <div className="text-6xl mb-4">👥</div>
+              <h3 className="text-lg font-medium mb-2">Selecciona un cliente</h3>
+              <p className="text-sm">Haz clic en cualquier cliente de la lista para ver sus detalles</p>
+            </div>
+          </div>
         )}
       </div>
 
