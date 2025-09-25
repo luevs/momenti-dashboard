@@ -11,6 +11,10 @@ import ClientesLealtad from "./pages/clientes-lealtad";
 import Insumos from "./pages/insumos";
 import MaquinaDetalle from "./pages/MaquinaDetalle";
 
+// NUEVOS: pages de Clientes (asegúrate que existan los archivos)
+import Clientes from "./pages/Clientes";
+import ClienteDetalle from "./pages/ClienteDetalle";
+
 // Componente para proteger rutas
 const PrivateRoute = ({ children }) => {
   const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
@@ -58,6 +62,23 @@ function App() {
         <Route path="/insumos" element={
           <PrivateRoute>
             <Layout><Insumos /></Layout>
+          </PrivateRoute>
+        } />
+
+        {/* RUTAS DE CLIENTES (MVP) */}
+        <Route path="/clientes" element={
+          <PrivateRoute>
+            <Layout><Clientes /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/clientes/new" element={
+          <PrivateRoute>
+            <Layout><ClienteDetalle /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/clientes/:id" element={
+          <PrivateRoute>
+            <Layout><ClienteDetalle /></Layout>
           </PrivateRoute>
         } />
       </Routes>
