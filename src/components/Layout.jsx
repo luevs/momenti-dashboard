@@ -59,18 +59,17 @@ export default function Layout({ children }) {
         {/* Topbar */}
         <header className="bg-white shadow px-6 py-4 flex justify-between items-center">
           <h1 className="text-xl font-semibold">Panel de Control</h1>
-        </header>
-
-        {/* Dynamic content */}
-        <div className="flex-1 relative">
-          {/* Agregar botón de logout en el header o donde prefieras */}
           <button
             onClick={handleLogout}
-            className="absolute top-4 right-4 flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:text-red-700"
+            className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:text-red-700"
           >
             <LogOut size={18} />
             Cerrar Sesión
           </button>
+        </header>
+
+        {/* Dynamic content */}
+        <div className="flex-1">
           {children}
         </div>
       </div>
