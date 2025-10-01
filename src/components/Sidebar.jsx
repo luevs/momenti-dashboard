@@ -8,10 +8,10 @@ export default function Sidebar() {
   const menuItems = [
     { path: "/", label: "Dashboard", icon: LayoutDashboard },
     { path: "/maquinas", label: "Maquinas", icon: Printer },
-    { path: "/reportes", label: "Reportes", icon: BarChart2 },
+   // { path: "/reportes", label: "Reportes", icon: BarChart2 },
     { path: "/clientes", label: "Clientes", icon: ClipboardList },
     { path: "/clientes-lealtad", label: "Clientes Lealtad", icon: Users },
-    { path: "/configuracion", label: "Configuración", icon: Settings },
+    //{ path: "/configuracion", label: "Configuración", icon: Settings },
   ];
 
   return (

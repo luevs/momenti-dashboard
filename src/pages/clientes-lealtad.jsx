@@ -268,42 +268,140 @@ export default function ClientesLealtad() {
     }
   };
 
+  const [existingCustomers, setExistingCustomers] = useState([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [isExistingCustomer, setIsExistingCustomer] = useState(true);
+
+  // Función para cargar clientes existentes
+  const fetchExistingCustomers = async () => {
+    const { data, error } = await supabase
+      .from('customers_')
+      .select('id, razon_social, alias')
+      .order('razon_social');
+    
+    if (error) {
+      console.error("Error al cargar clientes:", error);
+      setExistingCustomers([]);
+    } else {
+      setExistingCustomers(data || []);
+    }
+  };
+
+  // Agregar useEffect para cargar clientes cuando se abra el modal
+  useEffect(() => {
+    if (addClientModalOpen) {
+      fetchExistingCustomers();
+    }
+  }, [addClientModalOpen]);
+
   const handleAddClient = async () => {
     const { name, type, totalMeters, numeroWpp, lastPurchase } = newClientData;
-    if (!name || !totalMeters || !lastPurchase) {
-      alert("Por favor, completa todos los campos obligatorios.");
-      return;
-    }
+    
+    if (isExistingCustomer && selectedCustomerId) {
+      // Es un cliente existente, obtener su nombre
+      const selectedCustomer = existingCustomers.find(c => c.id === selectedCustomerId);
+      if (!selectedCustomer) {
+        alert("Por favor, selecciona un cliente válido.");
+        return;
+      }
 
-    const initialStatus = getClientStatus(totalMeters, totalMeters);
+      if (!type || !totalMeters || !lastPurchase) {
+        alert("Por favor, completa todos los campos obligatorios.");
+        return;
+      }
 
-    try {
-      const { error } = await supabase
-        .from('loyalty_clients')
-        .insert([
-          { 
-            name, 
+      try {
+        const { error } = await supabase
+          .from('loyalty_clients')
+          .insert([
+            {
+              name: selectedCustomer.razon_social,
+              customer_id: selectedCustomerId,
+              type, 
+              totalMeters: parseFloat(totalMeters), 
+              remainingMeters: parseFloat(totalMeters),
+              status: getClientStatus(totalMeters, totalMeters),
+              lastPurchase: lastPurchase,
+              numeroWpp: numeroWpp,
+              program_number: 1, // Por ahora 1, después se puede mejorar para contar programas existentes
+              is_active: true,
+              purchase_date: lastPurchase
+            }
+          ]);
+
+        if (error) {
+          console.error("Error al agregar programa:", error);
+          alert("Hubo un error al agregar el programa: " + error.message);
+        } else {
+          alert("Programa de lealtad agregado correctamente");
+          setAddClientModalOpen(false);
+          setNewClientData({ name: "", type: "DTF Textil", totalMeters: "", numeroWpp: "", lastPurchase: "" });
+          setSelectedCustomerId('');
+          setIsExistingCustomer(true);
+          fetchClients();
+        }
+      } catch (err) {
+        console.error("Error inesperado al agregar programa:", err);
+        alert("Ocurrió un error inesperado.");
+      }
+    } else {
+      // Es un cliente completamente nuevo
+      if (!name || !totalMeters || !lastPurchase) {
+        alert("Por favor, completa todos los campos obligatorios.");
+        return;
+      }
+
+      try {
+        // 1. Crear cliente en customers_
+        const { data: newCustomer, error: customerError } = await supabase
+          .from('customers_')
+          .insert([{
+            razon_social: name.trim(),
+            alias: name.trim(),
+            tipo_cliente: 'Cliente Final'
+          }])
+          .select()
+          .single();
+
+        if (customerError) {
+          console.error("Error al crear cliente:", customerError);
+          alert("Error al crear el cliente: " + customerError.message);
+          return;
+        }
+
+        // 2. Crear programa de lealtad
+        const { error: loyaltyError } = await supabase
+          .from('loyalty_clients')
+          .insert([{
+            name: name.trim(),
+            customer_id: newCustomer.id,
             type, 
             totalMeters: parseFloat(totalMeters), 
             remainingMeters: parseFloat(totalMeters),
-            status: initialStatus,
+            status: getClientStatus(totalMeters, totalMeters),
             lastPurchase: lastPurchase,
-            numeroWpp: numeroWpp
-          }
-        ]);
+            numeroWpp: numeroWpp,
+            program_number: 1,
+            is_active: true,
+            purchase_date: lastPurchase
+          }]);
 
-      if (error) {
-        console.error("Error al agregar cliente:", error);
-        alert("Hubo un error al agregar el cliente: " + error.message);
-      } else {
-        alert("Cliente agregado correctamente");
+        if (loyaltyError) {
+          console.error("Error al crear programa:", loyaltyError);
+          alert("Error al crear el programa de lealtad: " + loyaltyError.message);
+          return;
+        }
+
+        alert("Cliente y programa creados exitosamente");
         setAddClientModalOpen(false);
         setNewClientData({ name: "", type: "DTF Textil", totalMeters: "", numeroWpp: "", lastPurchase: "" });
+        setIsExistingCustomer(true);
         fetchClients();
+
+      } catch (err) {
+        console.error("Error inesperado:", err);
+        alert("Error inesperado al crear el cliente.");
       }
-    } catch (err) {
-      console.error("Error inesperado al agregar cliente:", err);
-      alert("Ocurrió un error inesperado.");
     }
   };
   
@@ -509,7 +607,7 @@ export default function ClientesLealtad() {
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
           >
             <Plus size={18} />
-            Agregar Cliente
+            Agregar Programa
           </button>
         </div>
       </div>
@@ -822,25 +920,83 @@ export default function ClientesLealtad() {
       {/* MODAL para agregar nuevo cliente */}
       {addClientModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
-          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-lg relative">
+          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-lg relative max-h-[90vh] overflow-y-auto">
             <button
-              onClick={() => setAddClientModalOpen(false)}
+              onClick={() => {
+                setAddClientModalOpen(false);
+                setSelectedCustomerId('');
+                setIsExistingCustomer(true);
+                setNewClientData({ name: "", type: "DTF Textil", totalMeters: "", numeroWpp: "", lastPurchase: "" });
+              }}
               className="absolute top-3 right-3 text-gray-500 hover:text-black"
             >
               <X />
             </button>
             <h2 className="text-xl font-semibold mb-4">
-              Agregar nuevo cliente con programa
+              Agregar Programa de Lealtad
             </h2>
+            
+            {/* Toggle para cliente existente o nuevo */}
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setIsExistingCustomer(true)}
+                className={`px-3 py-2 rounded text-sm transition ${
+                  isExistingCustomer 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                Cliente Existente
+              </button>
+              <button
+                onClick={() => setIsExistingCustomer(false)}
+                className={`px-3 py-2 rounded text-sm transition ${
+                  !isExistingCustomer 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                Cliente Nuevo
+              </button>
+            </div>
+
             <div className="flex flex-col gap-4">
-              <label className="block text-gray-700 font-bold">Nombre del cliente *</label>
-              <input
-                type="text"
-                placeholder="Nombre del cliente"
-                value={newClientData.name}
-                onChange={(e) => setNewClientData({ ...newClientData, name: e.target.value })}
-                className="border rounded px-3 py-2 w-full"
-              />
+              {isExistingCustomer ? (
+                <>
+                  <label className="block text-gray-700 font-bold">Seleccionar Cliente *</label>
+                  <select
+                    value={selectedCustomerId}
+                    onChange={(e) => setSelectedCustomerId(e.target.value)}
+                    className="border rounded px-3 py-2 w-full"
+                  >
+                    <option value="">-- Selecciona un cliente --</option>
+                    {existingCustomers.map(customer => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.razon_social}
+                        {customer.alias && customer.alias !== customer.razon_social && ` (${customer.alias})`}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500">
+                    Se creará un programa de lealtad para el cliente seleccionado
+                  </p>
+                </>
+              ) : (
+                <>
+                  <label className="block text-gray-700 font-bold">Nombre del cliente *</label>
+                  <input
+                    type="text"
+                    placeholder="Nombre del cliente nuevo"
+                    value={newClientData.name}
+                    onChange={(e) => setNewClientData({ ...newClientData, name: e.target.value })}
+                    className="border rounded px-3 py-2 w-full"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Se creará el cliente en la base de datos y su programa de lealtad
+                  </p>
+                </>
+              )}
+              
               <label className="block text-gray-700 font-bold">Número de WhatsApp</label>
               <input
                 type="text"
@@ -852,6 +1008,7 @@ export default function ClientesLealtad() {
               <span className="text-xs text-gray-500 mt-1 block">
                 Formato recomendado: <b>521XXXXXXXXXX</b> (ejemplo para México, incluye código de país y número sin espacios ni signos)
               </span>
+              
               <label className="block text-gray-700 font-bold">Tipo de programa *</label>
               <select
                 value={newClientData.type}
@@ -861,6 +1018,7 @@ export default function ClientesLealtad() {
                 <option value="DTF Textil">DTF Textil</option>
                 <option value="UV DTF">UV DTF</option>
               </select>
+              
               <label className="block text-gray-700 font-bold">Metros totales del programa *</label>
               <input
                 type="number"
@@ -870,6 +1028,7 @@ export default function ClientesLealtad() {
                 className="border rounded px-3 py-2 w-full"
                 min="0"
               />
+              
               <label className="block text-gray-700 font-bold">Fecha de compra *</label>
               <input
                 type="date"
@@ -878,11 +1037,12 @@ export default function ClientesLealtad() {
                 onChange={(e) => setNewClientData({ ...newClientData, lastPurchase: e.target.value })}
                 className="border rounded px-3 py-2 w-full"
               />
+              
               <button
                 onClick={handleAddClient}
                 className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
               >
-                Guardar Cliente
+                {isExistingCustomer ? 'Crear Programa' : 'Crear Cliente y Programa'}
               </button>
             </div>
           </div>
