@@ -25,11 +25,28 @@ export default function AlertsPanel({ onReponer, onRegister, pollInterval = 0 })
 
       // 1) insumos críticos
       const { data: insumos, error: insError } = await supabase
-        .from("insumos")
-        .select("id, nombre, stock_actual, minimo, unidad")
-        .lte("stock_actual", "minimo");
+        .from("machine_supplies")
+        .select(`
+          id,
+          current_stock,
+          minimum_stock,
+          supply_types (
+            name,
+            unit
+          )
+        `)
+        .lte("current_stock", "minimum_stock");
       if (insError) throw insError;
-      setInsumosCriticos(insumos || []);
+      
+      // Map the results to match expected structure
+      const mappedInsumos = (insumos || []).map(item => ({
+        id: item.id,
+        nombre: item.supply_types?.name || 'Sin nombre',
+        stock_actual: item.current_stock,
+        minimo: item.minimum_stock,
+        unidad: item.supply_types?.unit || ''
+      }));
+      setInsumosCriticos(mappedInsumos);
 
       // 2) máquinas sin corte hoy
       const { data: todayRecords, error: recError } = await supabase

@@ -20,11 +20,20 @@ export default function Clientes() {
   const [newStatus, setNewStatus] = useState("active");
   const [newPhone, setNewPhone] = useState("");
 
+<<<<<<< HEAD
   // Modal para eliminar cliente
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteCustomerId, setDeleteCustomerId] = useState(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [deletePassword, setDeletePassword] = useState("");
+=======
+  // Estados para el redimensionamiento dinámico
+  const [listWidth, setListWidth] = useState(400);
+  const draggingRef = useRef(false);
+  const containerRef = useRef(null);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
+>>>>>>> 20ef1f1760d4fc5ca2c56e289326c96d9e2bae68
 
   // Modal para editar cliente
   const [showEditModal, setShowEditModal] = useState(false);
@@ -132,6 +141,7 @@ export default function Clientes() {
     }
   };
 
+<<<<<<< HEAD
   // Función para iniciar el proceso de eliminación
   const handleDeleteClick = (customerId) => {
     setDeleteCustomerId(customerId);
@@ -281,6 +291,8 @@ export default function Clientes() {
     }
   };
 
+=======
+>>>>>>> 20ef1f1760d4fc5ca2c56e289326c96d9e2bae68
   // Handlers para el redimensionamiento
   const handleMouseDown = (e) => {
     e.preventDefault();
@@ -299,6 +311,10 @@ export default function Clientes() {
     const deltaX = e.clientX - startXRef.current;
     const newWidth = startWidthRef.current + deltaX;
     
+<<<<<<< HEAD
+=======
+    // Límites: mínimo 250px, máximo 70% del contenedor
+>>>>>>> 20ef1f1760d4fc5ca2c56e289326c96d9e2bae68
     const minWidth = 250;
     const maxWidth = containerWidth * 0.7;
     
@@ -326,6 +342,7 @@ export default function Clientes() {
     };
   }, [listWidth]);
 
+<<<<<<< HEAD
   const resetLayout = () => {
     setListWidth(400);
   };
@@ -352,6 +369,45 @@ export default function Clientes() {
                 <option value="sales">Mostrar: Ventas</option>
               </select>
               <button onClick={() => setShowNewModal(true)} className="bg-blue-600 text-white px-3 py-1 rounded">Nuevo</button>
+=======
+  // Función para resetear el tamaño
+  const resetLayout = () => {
+    setListWidth(400);
+  };
+
+  return (
+    <div className="p-6 flex gap-0 relative select-none h-full" ref={containerRef}>
+      {/* Lista de clientes */}
+      <div 
+        style={{ width: `${listWidth}px` }} 
+        className="flex-shrink-0 bg-white rounded-l-lg border border-r-0 border-gray-200 overflow-hidden"
+      >
+        <div className="p-4 h-full flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-xl font-semibold">Clientes</h1>
+          <div className="flex items-center gap-2">
+            <select value={metric} onChange={e => setMetric(e.target.value)} className="border rounded px-2 py-1 text-sm">
+              <option value="phone">Mostrar: Contacto</option>
+              <option value="sales">Mostrar: Ventas</option>
+            </select>
+            <button onClick={() => setShowNewModal(true)} className="bg-blue-600 text-white px-3 py-1 rounded">Nuevo</button>
+          </div>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          <input value={q} onChange={e => setQ(e.target.value)} className="flex-1 border rounded px-3 py-1" placeholder="Buscar por nombre" />
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border rounded px-2">
+            <option value="all">Todos</option>
+            <option value="active">Activos</option>
+            <option value="inactive">Inactivos</option>
+          </select>
+        </div>
+
+          <div className="flex-1 overflow-y-auto space-y-2">
+          {filtered.map(c => (
+            <div key={c.id} onClick={() => setSelectedId(c.id)} className="cursor-pointer">
+              <CustomerCard customer={c} active={c.id === selectedId} metric={metric} />
+>>>>>>> 20ef1f1760d4fc5ca2c56e289326c96d9e2bae68
             </div>
           </div>
 
@@ -398,6 +454,7 @@ export default function Clientes() {
             {filtered.length === 0 && <div className="text-sm text-gray-500">No hay clientes</div>}
           </div>
         </div>
+        </div>
       </div>
 
       {/* Separador draggable */}
@@ -407,8 +464,15 @@ export default function Clientes() {
         style={{ zIndex: 10 }}
         title="Arrastra para redimensionar"
       >
+<<<<<<< HEAD
         <div className="absolute inset-y-0 left-0 w-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
         
+=======
+        {/* Indicador visual */}
+        <div className="absolute inset-y-0 left-0 w-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
+        
+        {/* Botón de reset (aparece al hacer hover) */}
+>>>>>>> 20ef1f1760d4fc5ca2c56e289326c96d9e2bae68
         <button
           onClick={resetLayout}
           className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 
@@ -424,7 +488,11 @@ export default function Clientes() {
       <div className="flex-1 min-w-0 bg-white rounded-r-lg border border-l-0 border-gray-200">
         {selectedId ? (
           <div className="h-full">
+<<<<<<< HEAD
             <CustomerDetail customer={selectedCustomer} onClose={() => setSelectedId(null)} />
+=======
+            <CustomerDetail customerId={selectedId} onClose={() => setSelectedId(null)} />
+>>>>>>> 20ef1f1760d4fc5ca2c56e289326c96d9e2bae68
           </div>
         ) : (
           <div className="h-full flex items-center justify-center">
