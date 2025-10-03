@@ -56,7 +56,7 @@ const LoyaltyTicket = ({ isOpen, onClose, ticketData }) => {
                 <strong>{order.metersConsumed}m</strong> consumidos de <strong>{client.type}</strong>
               </p>
               <p className="text-sm text-blue-500">
-                Quedan <strong>{client.remainingMeters.toFixed(1)}m</strong> en su programa
+                Quedan <strong>{client.remainingMeters.toFixed(2)}m</strong> en su programa
               </p>
             </div>
           </div>
@@ -84,7 +84,7 @@ const LoyaltyTicket = ({ isOpen, onClose, ticketData }) => {
               Firma de Autorización del Cliente
             </h3>
             <p className="text-sm text-gray-600 text-center mb-3">
-              El cliente confirma el consumo de {order.metersConsumed.toFixed(1)} metros
+              El cliente confirma el consumo de {order.metersConsumed.toFixed(2)} metros
             </p>
             <div className="border-2 border-dashed border-gray-400 rounded-lg bg-gray-50 p-8 flex items-center justify-center">
               <span className="text-gray-400">(Espacio para firma física)</span>

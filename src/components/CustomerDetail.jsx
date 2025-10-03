@@ -55,15 +55,15 @@ export default function CustomerDetail({ customer, onClose }) {
 
       // Query para programas de lealtad
       const { data: programsData, error: programsError } = await supabase
-        .from("loyalty_clients")
-        .select("id, type, totalMeters, remainingMeters, status, purchase_date, program_number, name, is_active, created_at")
+        .from("loyalty_programs")
+        .select("id, type, total_meters, remaining_meters, status, purchase_date, program_number, numero_wpp, completion_date, created_at")
         .eq("customer_id", customer.id)
         .order('program_number', { ascending: false });
 
       console.log("Ventas encontradas:", ventasData);
       console.log("Programas encontrados:", programsData);
       console.log("Customer completo:", customer);
-      console.log("Nombre a buscar:", customer.name);
+      console.log("Customer ID para búsqueda:", customer.id);
       console.log("Error en programas:", programsError);
 
       if (!ventasError) {
@@ -105,9 +105,9 @@ export default function CustomerDetail({ customer, onClose }) {
         
         if (programsData && programsData.length > 0) {
           const totalPrograms = programsData.length;
-          const totalMetersEverPurchased = programsData.reduce((sum, p) => sum + Number(p.totalMeters || 0), 0);
-          const totalMetersRemaining = programsData.reduce((sum, p) => sum + Number(p.remainingMeters || 0), 0);
-          const activePrograms = programsData.filter(p => p.is_active === true && Number(p.remainingMeters) > 0);
+          const totalMetersEverPurchased = programsData.reduce((sum, p) => sum + Number(p.total_meters || 0), 0);
+          const totalMetersRemaining = programsData.reduce((sum, p) => sum + Number(p.remaining_meters || 0), 0);
+          const activePrograms = programsData.filter(p => p.status === 'activo' && Number(p.remaining_meters) > 0);
           
           setLoyaltyKPIs({
             totalPrograms,
@@ -287,7 +287,7 @@ export default function CustomerDetail({ customer, onClose }) {
                     <div className="flex items-center gap-2 text-indigo-700 mb-1">
                       <span className="text-xs font-medium">Metros Disponibles</span>
                     </div>
-                    <div className="text-2xl font-bold text-indigo-900">{loyaltyKPIs.totalMetersRemaining.toFixed(1)}m</div>
+                    <div className="text-2xl font-bold text-indigo-900">{loyaltyKPIs.totalMetersRemaining.toFixed(2)}m</div>
                   </div>
 
                   <div className="p-4 bg-pink-50 rounded-lg col-span-2">
@@ -310,8 +310,8 @@ export default function CustomerDetail({ customer, onClose }) {
                       </div>
                       <div className="text-right">
                         <div className="font-bold text-sm">
-                          {program.remainingMeters.toFixed(1)}m / {program.totalMeters}m
-                        </div>
+                            {program.remaining_meters?.toFixed(2) || 0}m / {program.total_meters || 0}m
+                          </div>
                         <div className={`text-xs px-2 py-1 rounded ${
                           program.status === 'activo' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                         }`}>
@@ -411,7 +411,7 @@ export default function CustomerDetail({ customer, onClose }) {
                     </div>
                     <div className="p-4 bg-indigo-50 rounded-lg">
                       <div className="text-xs text-indigo-700 font-medium">Metros Disponibles</div>
-                      <div className="text-2xl font-bold text-indigo-900">{loyaltyKPIs.totalMetersRemaining.toFixed(1)}m</div>
+                      <div className="text-2xl font-bold text-indigo-900">{loyaltyKPIs.totalMetersRemaining.toFixed(2)}m</div>
                     </div>
                     <div className="p-4 bg-pink-50 rounded-lg">
                       <div className="text-xs text-pink-700 font-medium">Metros Históricos</div>
@@ -430,9 +430,14 @@ export default function CustomerDetail({ customer, onClose }) {
                           <div className="text-xs text-gray-500">
                             Comprado: {new Date(program.purchase_date || program.created_at).toLocaleDateString()}
                           </div>
+                          {program.numero_wpp && (
+                            <div className="text-xs text-blue-600 mt-1">
+                              📱 {program.numero_wpp}
+                            </div>
+                          )}
                         </div>
                         <div className="text-right">
-                          <div className="font-bold">{program.remainingMeters}m / {program.totalMeters}m</div>
+                          <div className="font-bold">{program.remaining_meters}m / {program.total_meters}m</div>
                           <div className={`text-xs px-2 py-1 rounded mt-1 ${
                             program.status === 'activo' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                           }`}>

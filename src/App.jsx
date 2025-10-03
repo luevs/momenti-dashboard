@@ -7,13 +7,16 @@ import Dashboard from "./pages/Dashboard";
 import Maquinas from "./pages/Maquinas";
 import Reportes from "./pages/Reportes";
 import Configuracion from "./pages/Configuracion";
-import ClientesLealtad from "./pages/clientes-lealtad";
+import ClientesLealtad from "./pages/Clientes-lealtad";
 import Insumos from "./pages/insumos";
 import MaquinaDetalle from "./pages/MaquinaDetalle";
 
 // NUEVOS: pages de Clientes (asegúrate que existan los archivos)
 import Clientes from "./pages/Clientes";
 import ClienteDetalle from "./pages/ClienteDetalle";
+
+// TEMPORAL: Página de migración (ELIMINAR DESPUÉS DE USAR)
+import MigrationPage from "./pages/MigrationPage";
 
 // Componente para proteger rutas
 const PrivateRoute = ({ children }) => {
@@ -79,6 +82,13 @@ function App() {
         <Route path="/clientes/:id" element={
           <PrivateRoute>
             <Layout><ClienteDetalle /></Layout>
+          </PrivateRoute>
+        } />
+
+        {/* TEMPORAL: Ruta de migración (ELIMINAR DESPUÉS DE USAR) */}
+        <Route path="/migration" element={
+          <PrivateRoute>
+            <MigrationPage />
           </PrivateRoute>
         } />
       </Routes>

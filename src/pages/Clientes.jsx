@@ -9,6 +9,7 @@ export default function Clientes() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [customers, setCustomers] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   // UI: qué métrica mostrar en los cards
   const [metric, setMetric] = useState("phone"); // "phone" | "sales"
@@ -17,23 +18,14 @@ export default function Clientes() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("Revendedor");
-  const [newStatus, setNewStatus] = useState("active");
+  // const [newStatus, setNewStatus] = useState("active"); // Column doesn't exist
   const [newPhone, setNewPhone] = useState("");
 
-<<<<<<< HEAD
   // Modal para eliminar cliente
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteCustomerId, setDeleteCustomerId] = useState(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [deletePassword, setDeletePassword] = useState("");
-=======
-  // Estados para el redimensionamiento dinámico
-  const [listWidth, setListWidth] = useState(400);
-  const draggingRef = useRef(false);
-  const containerRef = useRef(null);
-  const startXRef = useRef(0);
-  const startWidthRef = useRef(0);
->>>>>>> 20ef1f1760d4fc5ca2c56e289326c96d9e2bae68
 
   // Modal para editar cliente
   const [showEditModal, setShowEditModal] = useState(false);
@@ -44,6 +36,7 @@ export default function Clientes() {
   const [editEmail, setEditEmail] = useState("");
   const [editAddress, setEditAddress] = useState("");
   const [editRFC, setEditRFC] = useState("");
+  // const [editCustomerId, setEditCustomerId] = useState(""); // No needed anymore
 
   // Estados para el redimensionamiento dinámico
   const [listWidth, setListWidth] = useState(400);
@@ -55,21 +48,57 @@ export default function Clientes() {
   // Cargar clientes reales de Supabase
   useEffect(() => {
     const fetchCustomers = async () => {
-      const { data, error } = await supabase
-        .from("customers_")
-        .select("id, alias, razon_social, telefono, celular, email");
-      if (error) {
-        console.error("Error al cargar clientes:", error);
+      console.log("🔍 Intentando cargar clientes de la tabla customers_...");
+      console.log("🔧 Configuración de Supabase:", {
+        url: import.meta.env.VITE_SUPABASE_URL,
+        hasKey: !!import.meta.env.VITE_SUPABASE_ANON_KEY
+      });
+      
+      setIsLoading(true);
+      
+      try {
+        // Primero vamos a probar la conexión básica
+        console.log("🧪 Testing conexión a Supabase...");
+        const testConnection = await supabase.from("customers_").select("count", { count: "exact", head: true });
+        console.log("📡 Test de conexión:", testConnection);
+
+        const { data, error } = await supabase
+          .from("customers_")
+          .select("id, alias, razon_social, telefono, celular, email");
+        
+        console.log("📊 Respuesta de Supabase:", { data, error });
+        
+        if (error) {
+          console.error("❌ Error al cargar clientes:", error);
+          console.error("Código de error:", error.code);
+          console.error("Mensaje de error:", error.message);
+          console.error("Detalles del error:", error.details);
+          console.error("Hint:", error.hint);
+          setCustomers([]);
+        } else {
+          console.log("✅ Datos cargados exitosamente:", data);
+          console.log("📈 Cantidad de clientes encontrados:", data?.length || 0);
+          
+          const formattedCustomers = (data || []).map(c => {
+            console.log("🔄 Procesando cliente:", c);
+            return {
+              id: c.id,
+              name: c.razon_social || c.alias || "Sin nombre",
+              phone: c.celular || c.telefono || "",
+              email: c.email || "",
+              status: "active", // Default status since column doesn't exist
+            };
+          });
+          
+          console.log("🎯 Clientes formateados:", formattedCustomers);
+          setCustomers(formattedCustomers);
+        }
+      } catch (err) {
+        console.error("💥 Error inesperado al cargar clientes:", err);
+        console.error("Stack trace:", err.stack);
         setCustomers([]);
-      } else {
-        setCustomers(
-          (data || []).map(c => ({
-            id: c.id,
-            name: c.razon_social || c.alias || "Sin nombre",
-            phone: c.celular || c.telefono || "",
-            email: c.email || "",
-          }))
-        );
+      } finally {
+        setIsLoading(false);
       }
     };
     fetchCustomers();
@@ -77,10 +106,15 @@ export default function Clientes() {
 
   const filtered = useMemo(() => {
     return customers.filter(c => {
-      if (!q) return true;
-      return c.name.toLowerCase().includes(q.toLowerCase());
+      // Filtrar por texto de búsqueda
+      const matchesSearch = !q || c.name.toLowerCase().includes(q.toLowerCase());
+      
+      // Filtrar por status (todos son "active" por defecto)
+      const matchesStatus = filterStatus === "all" || filterStatus === "active";
+      
+      return matchesSearch && matchesStatus;
     });
-  }, [customers, q]);
+  }, [customers, q, filterStatus]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -130,7 +164,6 @@ export default function Clientes() {
       // Limpiar formulario
       setNewName("");
       setNewType("Revendedor");
-      setNewStatus("active");
       setNewPhone("");
       setShowNewModal(false);
       setSelectedId(data.id);
@@ -141,7 +174,6 @@ export default function Clientes() {
     }
   };
 
-<<<<<<< HEAD
   // Función para iniciar el proceso de eliminación
   const handleDeleteClick = (customerId) => {
     setDeleteCustomerId(customerId);
@@ -238,6 +270,18 @@ export default function Clientes() {
   };
 
   // Función para guardar los cambios del cliente editado
+  // Función para limpiar el formulario de edición
+  const clearEditForm = () => {
+    setShowEditModal(false);
+    setEditingCustomer(null);
+    setEditName("");
+    setEditType("Revendedor");
+    setEditPhone("");
+    setEditEmail("");
+    setEditAddress("");
+    setEditRFC("");
+  };
+
   const handleSaveEdit = async (e) => {
     e.preventDefault();
     if (!editName.trim()) {
@@ -279,9 +323,8 @@ export default function Clientes() {
           : c
       ));
 
-      // Cerrar modal
-      setShowEditModal(false);
-      setEditingCustomer(null);
+      // Cerrar modal y limpiar formulario
+      clearEditForm();
       
       alert("Cliente actualizado exitosamente");
 
@@ -291,8 +334,6 @@ export default function Clientes() {
     }
   };
 
-=======
->>>>>>> 20ef1f1760d4fc5ca2c56e289326c96d9e2bae68
   // Handlers para el redimensionamiento
   const handleMouseDown = (e) => {
     e.preventDefault();
@@ -311,10 +352,6 @@ export default function Clientes() {
     const deltaX = e.clientX - startXRef.current;
     const newWidth = startWidthRef.current + deltaX;
     
-<<<<<<< HEAD
-=======
-    // Límites: mínimo 250px, máximo 70% del contenedor
->>>>>>> 20ef1f1760d4fc5ca2c56e289326c96d9e2bae68
     const minWidth = 250;
     const maxWidth = containerWidth * 0.7;
     
@@ -342,7 +379,6 @@ export default function Clientes() {
     };
   }, [listWidth]);
 
-<<<<<<< HEAD
   const resetLayout = () => {
     setListWidth(400);
   };
@@ -368,46 +404,14 @@ export default function Clientes() {
                 <option value="phone">Mostrar: Contacto</option>
                 <option value="sales">Mostrar: Ventas</option>
               </select>
+              <button 
+                onClick={() => window.location.reload()} 
+                className="bg-gray-500 text-white px-3 py-1 rounded text-xs"
+                title="Recargar datos"
+              >
+                🔄
+              </button>
               <button onClick={() => setShowNewModal(true)} className="bg-blue-600 text-white px-3 py-1 rounded">Nuevo</button>
-=======
-  // Función para resetear el tamaño
-  const resetLayout = () => {
-    setListWidth(400);
-  };
-
-  return (
-    <div className="p-6 flex gap-0 relative select-none h-full" ref={containerRef}>
-      {/* Lista de clientes */}
-      <div 
-        style={{ width: `${listWidth}px` }} 
-        className="flex-shrink-0 bg-white rounded-l-lg border border-r-0 border-gray-200 overflow-hidden"
-      >
-        <div className="p-4 h-full flex flex-col">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-semibold">Clientes</h1>
-          <div className="flex items-center gap-2">
-            <select value={metric} onChange={e => setMetric(e.target.value)} className="border rounded px-2 py-1 text-sm">
-              <option value="phone">Mostrar: Contacto</option>
-              <option value="sales">Mostrar: Ventas</option>
-            </select>
-            <button onClick={() => setShowNewModal(true)} className="bg-blue-600 text-white px-3 py-1 rounded">Nuevo</button>
-          </div>
-        </div>
-
-        <div className="flex gap-2 mb-4">
-          <input value={q} onChange={e => setQ(e.target.value)} className="flex-1 border rounded px-3 py-1" placeholder="Buscar por nombre" />
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border rounded px-2">
-            <option value="all">Todos</option>
-            <option value="active">Activos</option>
-            <option value="inactive">Inactivos</option>
-          </select>
-        </div>
-
-          <div className="flex-1 overflow-y-auto space-y-2">
-          {filtered.map(c => (
-            <div key={c.id} onClick={() => setSelectedId(c.id)} className="cursor-pointer">
-              <CustomerCard customer={c} active={c.id === selectedId} metric={metric} />
->>>>>>> 20ef1f1760d4fc5ca2c56e289326c96d9e2bae68
             </div>
           </div>
 
@@ -421,39 +425,56 @@ export default function Clientes() {
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-2">
-            {filtered.map(c => (
-              <div key={c.id} className="relative group">
-                <div onClick={() => setSelectedId(c.id)} className="cursor-pointer">
-                  <CustomerCard customer={c} active={c.id === selectedId} metric={metric} />
-                </div>
-                {/* Botones que aparecen al hacer hover */}
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEditClick(c);
-                    }}
-                    className="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-blue-600"
-                    title="Editar cliente"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteClick(c.id);
-                    }}
-                    className="bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600"
-                    title="Eliminar cliente"
-                  >
-                    ×
-                  </button>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                  <div className="text-sm text-gray-500">Cargando clientes...</div>
                 </div>
               </div>
-            ))}
-            {filtered.length === 0 && <div className="text-sm text-gray-500">No hay clientes</div>}
+            ) : filtered.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-4xl mb-2">👥</div>
+                <div className="text-sm text-gray-500">
+                  {customers.length === 0 ? "No hay clientes en la base de datos" : "No se encontraron clientes con los filtros aplicados"}
+                </div>
+                <div className="text-xs text-gray-400 mt-2">
+                  Total en BD: {customers.length} clientes
+                </div>
+              </div>
+            ) : (
+              filtered.map(c => (
+                <div key={c.id} className="relative group">
+                  <div onClick={() => setSelectedId(c.id)} className="cursor-pointer">
+                    <CustomerCard customer={c} active={c.id === selectedId} metric={metric} />
+                  </div>
+                  {/* Botones que aparecen al hacer hover */}
+                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditClick(c);
+                      }}
+                      className="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-blue-600"
+                      title="Editar cliente"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteClick(c.id);
+                      }}
+                      className="bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600"
+                      title="Eliminar cliente"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
-        </div>
         </div>
       </div>
 
@@ -464,15 +485,8 @@ export default function Clientes() {
         style={{ zIndex: 10 }}
         title="Arrastra para redimensionar"
       >
-<<<<<<< HEAD
         <div className="absolute inset-y-0 left-0 w-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
         
-=======
-        {/* Indicador visual */}
-        <div className="absolute inset-y-0 left-0 w-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
-        
-        {/* Botón de reset (aparece al hacer hover) */}
->>>>>>> 20ef1f1760d4fc5ca2c56e289326c96d9e2bae68
         <button
           onClick={resetLayout}
           className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 
@@ -488,11 +502,7 @@ export default function Clientes() {
       <div className="flex-1 min-w-0 bg-white rounded-r-lg border border-l-0 border-gray-200">
         {selectedId ? (
           <div className="h-full">
-<<<<<<< HEAD
             <CustomerDetail customer={selectedCustomer} onClose={() => setSelectedId(null)} />
-=======
-            <CustomerDetail customerId={selectedId} onClose={() => setSelectedId(null)} />
->>>>>>> 20ef1f1760d4fc5ca2c56e289326c96d9e2bae68
           </div>
         ) : (
           <div className="h-full flex items-center justify-center">
@@ -522,11 +532,8 @@ export default function Clientes() {
               </select>
             </div>
             <div className="w-32">
-              <label className="block text-xs text-gray-600">Estado</label>
-              <select value={newStatus} onChange={e => setNewStatus(e.target.value)} className="w-full border rounded px-2 py-1">
-                <option value="active">Activo</option>
-                <option value="inactive">Inactivo</option>
-              </select>
+              <label className="block text-xs text-gray-600">Tipo</label>
+              <div className="text-sm text-gray-500 py-1">Cliente Final</div>
             </div>
           </div>
 
@@ -613,7 +620,7 @@ export default function Clientes() {
       </Modal>
 
       {/* Modal para editar cliente */}
-      <Modal open={showEditModal} title="Editar Cliente" onClose={() => setShowEditModal(false)}>
+      <Modal open={showEditModal} title="Editar Cliente" onClose={clearEditForm}>
         <form onSubmit={handleSaveEdit}>
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div className="col-span-2">
@@ -686,7 +693,7 @@ export default function Clientes() {
           <div className="flex gap-2 justify-end pt-3 border-t">
             <button 
               type="button" 
-              onClick={() => setShowEditModal(false)} 
+              onClick={clearEditForm} 
               className="px-4 py-2 rounded border hover:bg-gray-50"
             >
               Cancelar
