@@ -1,5 +1,5 @@
 import React from 'react';
-import { Edit3, Calendar, CheckCircle, XCircle, Clock, AlertCircle, FileText } from 'lucide-react';
+import { Edit3, Calendar, CheckCircle, XCircle, Clock, AlertCircle, FileText, MessageCircle, Printer } from 'lucide-react';
 
 export default function ProgramTypeSection({
   customer,
@@ -148,8 +148,8 @@ export default function ProgramTypeSection({
                   <span>Completado: {formatDate(program.completion_date)}</span>
                 </div>
               )}
-              {program.numero_wpp && (
-                <span>📱 {program.numero_wpp}</span>
+              {customer.celular && (
+                <span>📱 {customer.celular}</span>
               )}
             </div>
 
@@ -163,12 +163,33 @@ export default function ProgramTypeSection({
           </div>
 
           <div className="flex flex-col items-end gap-2">
-            <div className="mt-2">
+            {/* Botones de acción */}
+            <div className="flex gap-2 mt-2">
               <button
                 onClick={() => onOpenProgramHistory ? onOpenProgramHistory(customer, program) : null}
                 className="text-sm px-2 py-1 rounded bg-purple-100 text-purple-700 hover:bg-purple-200"
               >
                 Historial
+              </button>
+              
+              {/* Botón WhatsApp */}
+              <button
+                onClick={() => onProgramWhatsApp && onProgramWhatsApp(customer, program)}
+                className="text-sm px-2 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200 flex items-center gap-1"
+                title="Enviar mensaje de WhatsApp"
+              >
+                <MessageCircle size={14} />
+                WhatsApp
+              </button>
+              
+              {/* Botón Imprimir */}
+              <button
+                onClick={() => onProgramPrint && onProgramPrint(customer, program)}
+                className="text-sm px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 flex items-center gap-1"
+                title="Imprimir ticket"
+              >
+                <Printer size={14} />
+                Imprimir
               </button>
             </div>
 

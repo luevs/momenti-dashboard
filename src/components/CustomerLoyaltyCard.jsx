@@ -149,7 +149,13 @@ function CustomerLoyaltyCard({
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[status]} ${statusTextColors[status]}`}>
                     {statusLabels[status]}
                   </span>
-                  {customer.telefono && (
+                  {customer.celular && (
+                    <div className="flex items-center gap-1">
+                      <Phone size={14} />
+                      <span>{customer.celular}</span>
+                    </div>
+                  )}
+                  {customer.telefono && !customer.celular && (
                     <div className="flex items-center gap-1">
                       <Phone size={14} />
                       <span>{customer.telefono}</span>

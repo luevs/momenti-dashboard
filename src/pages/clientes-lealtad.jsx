@@ -278,7 +278,7 @@ export default function ClientesLealtad() {
         meters_consumed: Number(metersUsed.toFixed ? metersUsed.toFixed(2) : metersUsed),
         unit: 'metros',
         status: 'completado',
-        recorded_at: new Date().toISOString(),
+        recorded_at: new Date(new Date().getTime() - (6 * 60 * 60 * 1000)).toISOString(),
         recorded_by: selectedRegisteredBy,
         observaciones: observaciones?.trim() || '',
         signature: null
@@ -335,12 +335,13 @@ export default function ClientesLealtad() {
           type: selectedTypeForMeters,
           totalMeters: selectedProgram.total_meters,
           remainingMeters: newRemainingMeters,
+          celular: selectedCustomerForMeters.celular || '', // ✅ Agregar celular del cliente
           loyaltyProgramPhone: selectedProgram.numero_wpp || selectedCustomerForMeters.telefono || '' // ✅ Usar loyaltyProgramPhone
         },
         order: {
           folio: generatedFolio,
           metersConsumed: metersUsed,
-          recordedAt: new Date().toISOString(),
+          recordedAt: new Date(new Date().getTime() - (6 * 60 * 60 * 1000)).toISOString(),
           recordedBy: selectedRegisteredBy,
           observaciones: orderRecord.observaciones || ''
         }
@@ -408,8 +409,8 @@ export default function ClientesLealtad() {
       fullTicketData: ticketData
     });
 
-    // ✅ SIEMPRE usar loyalty_programs.numero_wpp
-    const phoneRaw = cliente.loyaltyProgramPhone || '';
+    // ✅ SIEMPRE usar customers_.celular
+    const phoneRaw = cliente.celular || cliente.loyaltyProgramPhone || '';
     const phone = phoneRaw.replace(/\D/g, '');
     console.log('📱 WhatsApp phone source:', { 
       phoneRaw, 
@@ -432,7 +433,7 @@ export default function ClientesLealtad() {
       console.log('handleProgramWhatsApp called with:', { customer, program });
       // Use the same WhatsApp template as post-pedido
       const nombre = customer?.razon_social || customer?.name || '';
-      const phoneRaw = program?.numero_wpp || customer?.numeroWpp || customer?.telefono || '';
+      const phoneRaw = customer?.celular || program?.numero_wpp || customer?.numeroWpp || customer?.telefono || '';
       const phone = (phoneRaw || '').replace(/\D/g, '');
       if (!phone) {
         alert('No hay número válido para enviar WhatsApp');
@@ -460,7 +461,8 @@ export default function ClientesLealtad() {
           type: program?.type || customer?.type || '',
           totalMeters: program?.total_meters || customer?.totalMeters || 0,
           remainingMeters: program?.remaining_meters || customer?.remainingMeters || 0,
-          numeroWpp: program?.numero_wpp || customer?.numeroWpp || customer?.telefono || ''
+          celular: customer?.celular || '',
+          numeroWpp: customer?.celular || program?.numero_wpp || customer?.numeroWpp || customer?.telefono || ''
         },
         order: {
           metersConsumed: Number(((program?.total_meters || 0) - (program?.remaining_meters || 0)).toFixed(2)),
@@ -504,7 +506,7 @@ export default function ClientesLealtad() {
       const { data: rawData, error } = await supabase
         .from('customers_')
         .select(`
-          id, razon_social, alias, telefono, email, direccion,
+          id, razon_social, alias, telefono, celular, email, direccion,
           loyalty_programs (
             id, type, program_number, total_meters, remaining_meters,
             status, purchase_date, completion_date, numero_wpp,
@@ -548,17 +550,17 @@ export default function ClientesLealtad() {
       // 3. Transformar datos a estructura agrupada
       const transformedData = rawData.map(customer => {
         const groupedPrograms = groupProgramsByType(customer.loyalty_programs || []);
-        const totalActiveMeters = calculateTotalActiveMeters(customer.loyalty_programs || []);
         
         return {
           id: customer.id,
           razon_social: customer.razon_social,
           alias: customer.alias,
           telefono: customer.telefono,
+          celular: customer.celular,
           email: customer.email,
           direccion: customer.direccion,
           programs: groupedPrograms,
-          totalActiveMeters: totalActiveMeters,
+          totalActiveMeters: calculateTotalActiveMeters(customer.loyalty_programs || []),
           totalPrograms: customer.loyalty_programs?.length || 0,
           activePrograms: (customer.loyalty_programs || []).filter(p => p.status === 'activo').length,
           lastMetersRegistry: lastRegistryByCustomer[customer.id] || null
@@ -966,13 +968,6 @@ export default function ClientesLealtad() {
       return;
     }
 
-    // Validación extra: verificar que no haya programa activo del mismo tipo
-    const existingActiveProgram = selectedCustomerPrograms.find(p => p.type === type && p.status === 'activo');
-    if (existingActiveProgram) {
-      alert(`Este cliente ya tiene un programa activo de tipo "${type}". No se pueden tener dos programas activos del mismo tipo simultáneamente.`);
-      return;
-    }
-
     try {
       // 1. Si el número de WhatsApp cambió, actualizar en customers_
       const originalWhatsApp = selectedCustomer.celular || '';
@@ -1167,7 +1162,6 @@ export default function ClientesLealtad() {
 
     const total = parseFloat(editingProgramData.total_meters);
     const remaining = parseFloat(editingProgramData.remaining_meters);
-    const purchaseDate = editingProgramData.purchase_date;
     const reason = (editingProgramData.edit_reason || '').trim();
     const authorizedBy = (editingProgramData.edit_authorized_by || '').trim();
 
@@ -1181,10 +1175,6 @@ export default function ClientesLealtad() {
     }
     if (remaining > total) {
       alert('Los metros restantes no pueden ser mayores que los metros totales.');
-      return;
-    }
-    if (!purchaseDate) {
-      alert('Es necesario seleccionar la fecha de compra.');
       return;
     }
     if (!reason) {
@@ -1202,7 +1192,6 @@ export default function ClientesLealtad() {
         .update({
           total_meters: total,
           remaining_meters: remaining,
-          purchase_date: purchaseDate,
           edit_reason: reason,
           edit_authorized_by: authorizedBy,
           updated_at: new Date().toISOString()
@@ -1380,6 +1369,7 @@ export default function ClientesLealtad() {
     // El record debería tener la referencia al programa (program_id)
     let loyaltyProgramPhone = '';
     let currentRemainingMeters = 0;
+    let totalProgramMeters = 0;
     
     // Buscar en los programas del cliente el que corresponda al tipo del record
     if (selectedClient?.programs && record.type) {
@@ -1389,6 +1379,7 @@ export default function ClientesLealtad() {
         const program = typePrograms.active[0]; // Por ahora usamos el primero
         loyaltyProgramPhone = program.numero_wpp || '';
         currentRemainingMeters = Number(program.remaining_meters ?? 0); // ✅ Obtener metros restantes actuales
+        totalProgramMeters = Number(program.total_meters ?? 0); // ✅ Obtener metros totales del programa
       }
     }
     
@@ -1408,7 +1399,6 @@ export default function ClientesLealtad() {
     });
     
     // Calcular metros restantes actuales (estimación)
-    const totalMetersNum = Number(selectedClient?.totalMeters ?? selectedClient?.totalActiveMeters ?? 0);
     const metersConsumedNum = Number(record.meters_consumed ?? 0);
     
     const ticketInfo = {
@@ -1416,8 +1406,9 @@ export default function ClientesLealtad() {
         id: selectedClient?.id,
         name: selectedClient?.name || selectedClient?.razon_social || '',
         type: selectedClient?.type || record.type || '',
-        totalMeters: totalMetersNum,
+        totalMeters: totalProgramMeters || 0,
         remainingMeters: currentRemainingMeters, // ✅ Usar metros restantes del programa de lealtad
+        celular: selectedClient?.celular || '', // ✅ Agregar celular del cliente actual
         loyaltyProgramPhone: loyaltyProgramPhone // ✅ Usar el número del programa de lealtad
       },
       order: {

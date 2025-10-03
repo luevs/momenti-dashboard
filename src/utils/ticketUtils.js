@@ -46,7 +46,7 @@ export const generateTicketHTML = (ticketData, signatureDataURL, logoUrl = '/mom
 
   // Fallbacks seguros
   const registeredBy = order.registeredBy || '—';
-  const clientePhone = client.loyaltyProgramPhone || client.numeroWpp || client.phone || '/';
+  const clientePhone = client.celular || client.numeroWpp;
 
   return `
     <!DOCTYPE html>
