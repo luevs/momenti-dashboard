@@ -47,24 +47,21 @@ function CustomerLoyaltyCard({
     let programTypes = [];
 
     Object.entries(programs || {}).forEach(([type, typePrograms]) => {
-      const activePrograms = typePrograms.active || [];
-      const historicalPrograms = typePrograms.historical || [];
-      
+      const activePrograms = (typePrograms && typePrograms.active) || [];
+      const historicalPrograms = (typePrograms && typePrograms.historical) || [];
+
+      const activeMetersSum = activePrograms.reduce((sum, p) => sum + (p.remaining_meters || 0), 0);
+
+      programTypes.push({
+        type,
+        activeMeters: activeMetersSum,
+        activeCount: activePrograms.length,
+        totalCount: activePrograms.length + historicalPrograms.length
+      });
+
+      totalActiveMeters += activeMetersSum;
       totalPrograms += activePrograms.length + historicalPrograms.length;
       activeProgramsCount += activePrograms.length;
-      
-      if (activePrograms.length > 0 || historicalPrograms.length > 0) {
-        const activeMetersSum = activePrograms.reduce((sum, p) => sum + (p.remaining_meters || 0), 0);
-        
-        programTypes.push({
-          type,
-          activeMeters: activeMetersSum,
-          activeCount: activePrograms.length,
-          totalCount: activePrograms.length + historicalPrograms.length
-        });
-      }
-
-      totalActiveMeters += activePrograms.reduce((sum, p) => sum + (p.remaining_meters || 0), 0);
     });
 
     return {
@@ -155,12 +152,7 @@ function CustomerLoyaltyCard({
                       <span>{customer.celular}</span>
                     </div>
                   )}
-                  {customer.telefono && !customer.celular && (
-                    <div className="flex items-center gap-1">
-                      <Phone size={14} />
-                      <span>{customer.telefono}</span>
-                    </div>
-                  )}
+                  {/* fallback to telefono removed; prefer 'celular' only */}
                   {customer.email && (
                     <div className="flex items-center gap-1">
                       <Mail size={14} />

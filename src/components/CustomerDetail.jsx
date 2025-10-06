@@ -347,7 +347,7 @@ export default function CustomerDetail({ customer, onClose }) {
                     <Phone size={16} className="text-gray-400" /> Contacto
                   </div>
                   <div className="text-sm text-gray-800 bg-gray-50 p-3 rounded">
-                    <div><span className="text-gray-500">Teléfono:</span> {customer.telefono || "—"}</div>
+                    <div><span className="text-gray-500">Celular:</span> {customer.celular || "—"}</div>
                     <div><span className="text-gray-500">Celular:</span> {customer.celular || "—"}</div>
                   </div>
                 </div>

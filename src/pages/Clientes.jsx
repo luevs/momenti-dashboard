@@ -64,7 +64,7 @@ export default function Clientes() {
 
         const { data, error } = await supabase
           .from("customers_")
-          .select("id, alias, razon_social, telefono, celular, email");
+          .select("id, alias, razon_social, celular, email");
         
         console.log("📊 Respuesta de Supabase:", { data, error });
         
@@ -84,7 +84,7 @@ export default function Clientes() {
             return {
               id: c.id,
               name: c.razon_social || c.alias || "Sin nombre",
-              phone: c.celular || c.telefono || "",
+              phone: c.celular || "",
               email: c.email || "",
               status: "active", // Default status since column doesn't exist
             };
@@ -124,7 +124,7 @@ export default function Clientes() {
       razon_social: newName.trim(),
       alias: newName.trim(),
       tipo_cliente: newType,
-      telefono: newPhone || null,
+  celular: newPhone || null,
     });
 
     try {
@@ -135,7 +135,7 @@ export default function Clientes() {
             razon_social: newName.trim(),
             alias: newName.trim(),
             tipo_cliente: newType,
-            telefono: newPhone || null,
+            celular: newPhone || null,
           }
         ])
         .select()
@@ -155,7 +155,7 @@ export default function Clientes() {
       const newCustomer = {
         id: data.id,
         name: data.razon_social,
-        phone: data.telefono || data.celular || "",
+  phone: data.celular || "",
         email: data.email || "",
       };
 
@@ -262,7 +262,7 @@ export default function Clientes() {
     if (data && !error) {
       setEditName(data.razon_social || data.alias || "");
       setEditType(data.tipo_cliente || "Revendedor");
-      setEditPhone(data.telefono || data.celular || "");
+  setEditPhone(data.celular || "");
       setEditEmail(data.email || "");
       setEditAddress(data.direccion || "");
       setEditRFC(data.rfc || "");
@@ -296,7 +296,7 @@ export default function Clientes() {
           razon_social: editName.trim(),
           alias: editName.trim(),
           tipo_cliente: editType,
-          telefono: editPhone || null,
+          celular: editPhone || null,
           email: editEmail || null,
           direccion: editAddress || null,
           rfc: editRFC || null,
@@ -317,7 +317,7 @@ export default function Clientes() {
           ? {
               ...c,
               name: data.razon_social,
-              phone: data.telefono || data.celular || "",
+              phone: data.celular || "",
               email: data.email || "",
             }
           : c

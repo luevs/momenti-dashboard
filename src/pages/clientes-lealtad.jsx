@@ -336,7 +336,7 @@ export default function ClientesLealtad() {
           totalMeters: selectedProgram.total_meters,
           remainingMeters: newRemainingMeters,
           celular: selectedCustomerForMeters.celular || '', // ✅ Agregar celular del cliente
-          loyaltyProgramPhone: selectedProgram.numero_wpp || selectedCustomerForMeters.telefono || '' // ✅ Usar loyaltyProgramPhone
+          loyaltyProgramPhone: selectedProgram.numero_wpp || selectedCustomerForMeters.celular || '' // ✅ Usar loyaltyProgramPhone
         },
         order: {
           folio: generatedFolio,
@@ -433,7 +433,7 @@ export default function ClientesLealtad() {
       console.log('handleProgramWhatsApp called with:', { customer, program });
       // Use the same WhatsApp template as post-pedido
       const nombre = customer?.razon_social || customer?.name || '';
-      const phoneRaw = customer?.celular || program?.numero_wpp || customer?.numeroWpp || customer?.telefono || '';
+  const phoneRaw = customer?.celular || program?.numero_wpp || customer?.numeroWpp || '';
       const phone = (phoneRaw || '').replace(/\D/g, '');
       if (!phone) {
         alert('No hay número válido para enviar WhatsApp');
@@ -462,7 +462,7 @@ export default function ClientesLealtad() {
           totalMeters: program?.total_meters || customer?.totalMeters || 0,
           remainingMeters: program?.remaining_meters || customer?.remainingMeters || 0,
           celular: customer?.celular || '',
-          numeroWpp: customer?.celular || program?.numero_wpp || customer?.numeroWpp || customer?.telefono || ''
+          numeroWpp: customer?.celular || program?.numero_wpp || customer?.numeroWpp || ''
         },
         order: {
           metersConsumed: Number(((program?.total_meters || 0) - (program?.remaining_meters || 0)).toFixed(2)),
@@ -502,18 +502,18 @@ export default function ClientesLealtad() {
   const fetchCustomersWithPrograms = async () => {
     setIsLoading(true);
     try {
-      // 1. Obtener todos los clientes con sus programas
+      // 1. Obtener todos los clientes con sus programas (solo clientes con programas)
       const { data: rawData, error } = await supabase
         .from('customers_')
         .select(`
-          id, razon_social, alias, telefono, celular, email, direccion,
+          id, razon_social, alias, celular, email, direccion,
           loyalty_programs (
             id, type, program_number, total_meters, remaining_meters,
             status, purchase_date, completion_date, numero_wpp,
             edit_reason, edit_authorized_by, created_at
           )
         `)
-        .not('loyalty_programs.id', 'is', null); // Solo clientes que tengan programas
+        .not('loyalty_programs.id', 'is', null);
 
       if (error) {
         console.error("Error al obtener clientes:", error);
@@ -521,41 +521,45 @@ export default function ClientesLealtad() {
         return;
       }
 
-      // 2. Obtener el último registro de metros para cada cliente
-      const customerIds = rawData.map(c => c.id);
-      const { data: lastRegistries, error: registryError } = await supabase
-        .from('order_history')
-        .select('customer_id, recorded_at, client_name')
-        .or(`customer_id.in.(${customerIds.join(',')}),client_name.in.(${rawData.map(c => `"${c.razon_social}"`).join(',')})`)
-        .order('recorded_at', { ascending: false });
-
-      // Agrupar por customer_id y client_name para tomar solo el más reciente de cada uno
-      const lastRegistryByCustomer = {};
-      if (!registryError && lastRegistries) {
-        lastRegistries.forEach(registry => {
-          // Buscar por customer_id primero
-          if (registry.customer_id && !lastRegistryByCustomer[registry.customer_id]) {
-            lastRegistryByCustomer[registry.customer_id] = registry.recorded_at;
-          }
-          // Si no tiene customer_id, buscar por nombre
-          if (!registry.customer_id && registry.client_name) {
-            const matchingCustomer = rawData.find(c => c.razon_social === registry.client_name);
-            if (matchingCustomer && !lastRegistryByCustomer[matchingCustomer.id]) {
-              lastRegistryByCustomer[matchingCustomer.id] = registry.recorded_at;
-            }
-          }
-        });
+      if (!rawData || rawData.length === 0) {
+        setCustomersWithPrograms([]);
+        return;
       }
 
-      // 3. Transformar datos a estructura agrupada
+      // 2. Obtener los últimos registros solo por customer_id usando .in (más eficiente y seguro)
+      const customerIds = rawData.map(c => c.id).filter(Boolean);
+      let lastRegistries = [];
+
+      if (customerIds.length > 0) {
+        const { data: registryData, error: registryError } = await supabase
+          .from('order_history')
+          .select('customer_id, recorded_at, client_name')
+          .in('customer_id', customerIds)
+          .order('recorded_at', { ascending: false });
+
+        if (registryError) {
+          console.warn('No se pudo obtener registros por customer_id:', registryError);
+        } else {
+          lastRegistries = registryData || [];
+        }
+      }
+
+      // Build lookup for latest recorded_at per customer_id
+      const lastRegistryByCustomer = {};
+      lastRegistries.forEach(reg => {
+        if (reg.customer_id && !lastRegistryByCustomer[reg.customer_id]) {
+          lastRegistryByCustomer[reg.customer_id] = reg.recorded_at;
+        }
+      });
+
+      // 3. Transformar datos a estructura agrupada (sin hacer queries adicionales por nombre)
       const transformedData = rawData.map(customer => {
         const groupedPrograms = groupProgramsByType(customer.loyalty_programs || []);
-        
+
         return {
           id: customer.id,
           razon_social: customer.razon_social,
           alias: customer.alias,
-          telefono: customer.telefono,
           celular: customer.celular,
           email: customer.email,
           direccion: customer.direccion,
@@ -1237,7 +1241,7 @@ export default function ClientesLealtad() {
     let filtered = customersWithPrograms.filter(customer => {
       const searchTerm = searchQuery.toLowerCase();
       const customerName = (customer.razon_social || customer.alias || '').toLowerCase();
-      const customerPhone = (customer.telefono || '').toLowerCase();
+  const customerPhone = (customer.celular || '').toLowerCase();
       const customerEmail = (customer.email || '').toLowerCase();
       const customerId = (customer.id || '').toLowerCase();
       
@@ -1393,7 +1397,6 @@ export default function ClientesLealtad() {
       currentRemainingMeters,
       recordType: record.type,
       selectedClientPrograms: selectedClient?.programs,
-      recordType: record.type,
       availablePrograms: selectedClient?.programs,
       record: record
     });

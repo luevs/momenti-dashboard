@@ -1,6 +1,7 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, Printer, BarChart2, ClipboardList, Users, Settings } from "lucide-react";
+import { LayoutDashboard, Printer, BarChart2, ClipboardList, Users, Settings, DollarSign } from "lucide-react";
+import { isAdmin } from '../utils/auth';
 
 export default function Sidebar() {
   const location = useLocation();
@@ -11,7 +12,11 @@ export default function Sidebar() {
    // { path: "/reportes", label: "Reportes", icon: BarChart2 },
     { path: "/clientes", label: "Clientes", icon: ClipboardList },
     { path: "/clientes-lealtad", label: "Clientes Lealtad", icon: Users },
-    //{ path: "/configuracion", label: "Configuración", icon: Settings },
+    // Usuarios only visible to admins
+    ...(isAdmin() ? [{ path: "/usuarios", label: "Usuarios", icon: Users }] : []),
+    { path: "/corte", label: "Corte", icon: DollarSign },
+    // Configuracion only for admins
+    ...(isAdmin() ? [{ path: "/configuracion", label: "Configuración", icon: Settings }] : []),
   ];
 
   return (
