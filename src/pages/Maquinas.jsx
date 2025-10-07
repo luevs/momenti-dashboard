@@ -2,6 +2,7 @@ import { Printer, Plus, X } from "lucide-react";
 import MaquinaCard from '../components/MaquinaCard';
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
+import useCurrentUser from '../utils/useCurrentUser';
 import { useNavigate } from "react-router-dom";
 import MaquinaDetalle from "./MaquinaDetalle"; 
 
@@ -40,6 +41,7 @@ export default function Maquinas() {
   const [latestRecords, setLatestRecords] = useState({}); // { [machineId]: { date, meters_printed, registered_by } }
 
   const navigate = useNavigate();
+  const currentUser = useCurrentUser();
 
   // fetch latest records for the current impresoras
   const fetchLatestRecords = async () => {
@@ -111,7 +113,7 @@ export default function Maquinas() {
       machine_id: impresoraSeleccionada.id,
       date: registroFecha,
       meters_printed: Number(metrosHoy),
-      registered_by: localStorage.getItem('currentUser') || 'Sistema'
+      registered_by: (currentUser && (currentUser.name || currentUser.username || currentUser.email)) || 'Sistema'
     };
     const { error } = await supabase
       .from('machine_daily_prints')
@@ -136,7 +138,7 @@ export default function Maquinas() {
         machine_id: imp.id,
         date: corteFecha,
         meters_printed: Number(corteMetros[imp.id]),
-        registered_by: localStorage.getItem('currentUser') || 'Sistema'
+        registered_by: (currentUser && (currentUser.name || currentUser.username || currentUser.email)) || 'Sistema'
       }));
     if (registros.length === 0) {
       alert("Ingresa al menos un valor válido de metros.");

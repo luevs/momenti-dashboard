@@ -197,14 +197,57 @@ export default function MaquinaDetalle() {
 
   const fetchProductionRecords = async () => {
     setIsLoadingProduction(true);
-    const { data, error } = await supabase
-      .from('machine_daily_prints')
-      .select('*')
-      .eq('machine_id', id)
-      .order('date', { ascending: false })
-      .limit(31); // Último mes
-    if (!error) setProductionRecords(data || []);
+    // Intentar leer desde ambas tablas (algunos lugares usan 'production_records')
+    try {
+      const [{ data: d1, error: e1 }, { data: d2, error: e2 }] = await Promise.all([
+        supabase.from('machine_daily_prints').select('*').eq('machine_id', id).order('date', { ascending: false }).limit(31),
+        supabase.from('production_records').select('*').eq('machine_id', id).order('date', { ascending: false }).limit(31)
+      ]);
+
+      if (e1 && e2) {
+        console.error('Error fetching production records from both tables', e1, e2);
+        setProductionRecords([]);
+      } else {
+        // Normalizar registros a { id, date, meters_printed, registered_by }
+  const norm1 = (d1 || []).map(r => ({ id: r.id, date: r.date, meters_printed: (r.meters_printed ?? r.meters_produced ?? r.meters) || 0, registered_by: (r.registered_by || r.recorded_by) || null }));
+  const norm2 = (d2 || []).map(r => ({ id: r.id, date: r.date, meters_printed: (r.meters_printed ?? r.meters_produced ?? r.meters) || 0, registered_by: (r.registered_by || r.recorded_by) || null }));
+
+        // Combinar y ordenar por fecha descendente
+        const combined = [...norm1, ...norm2].sort((a, b) => new Date(b.date) - new Date(a.date));
+        setProductionRecords(combined);
+      }
+    } catch (err) {
+      console.error('Unexpected error fetching production records', err);
+      setProductionRecords([]);
+    }
+    // Debug: log the fetched records to inspect date formats and values
+    // Debug: show a sample of normalized records
+    try {
+      console.debug('fetchProductionRecords -> records count:', productionRecords.length, 'sample:', productionRecords.slice(0,5));
+    } catch (e) {
+      console.debug('fetchProductionRecords -> debug error', e);
+    }
     setIsLoadingProduction(false);
+  };
+
+  // Calcular total del mes actual y guardar en state
+  const calcularTotalMes = () => {
+    try {
+      const month = today.getMonth();
+      const year = today.getFullYear();
+      const total = productionRecords
+        .filter(r => {
+          const d = new Date(r.date);
+          return d.getMonth() === month && d.getFullYear() === year;
+        })
+        .reduce((sum, r) => sum + Number(r.meters_printed || 0), 0);
+      setCorteTotalMes(total);
+      return total;
+    } catch (e) {
+      console.error('Error calcularTotalMes:', e);
+      setCorteTotalMes(0);
+      return 0;
+    }
   };
 
   // Obtener insumos de la máquina activa
@@ -518,34 +561,51 @@ yesterday.setDate(today.getDate() - 1);
 const todayStr = getLocalDateString();
 const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
 
-const getMetersByDate = (dateStr) =>
-  productionRecords
-    .filter(r => (typeof r.date === "string" ? r.date.slice(0, 10) : getLocalDateString(new Date(r.date))) === dateStr)
-    .reduce((sum, r) => sum + Number(r.meters_printed), 0);
+  // Helper to consistently get YYYY-MM-DD from a record date (avoids timezone mismatches)
+  const dateToISODate = (d) => {
+    if (!d) return "";
+    try {
+      const dt = new Date(d);
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth() + 1).padStart(2, '0');
+      const day = String(dt.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    } catch (e) {
+      return String(d).slice(0,10);
+    }
+  };
 
-const getMetersThisWeek = () => {
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay());
-  return productionRecords
-    .filter(r => new Date(r.date) >= startOfWeek)
-    .reduce((sum, r) => sum + Number(r.meters_printed), 0);
-};
+  const getMetersByDate = (dateStr) => {
+    // debug: comprobar registros
+    // console.debug('getMetersByDate called for', dateStr, 'records:', productionRecords.length);
+    return productionRecords
+      .filter(r => dateToISODate(r.date) === dateStr)
+      .reduce((sum, r) => sum + Number(r.meters_printed || 0), 0);
+  };
 
-const getMetersThisMonth = () => {
-  const month = today.getMonth();
-  const year = today.getFullYear();
-  return productionRecords
-    .filter(r => {
-      const d = new Date(r.date);
-      return d.getMonth() === month && d.getFullYear() === year;
-    })
-    .reduce((sum, r) => sum + Number(r.meters_printed), 0);
-};
+  const getMetersThisWeek = () => {
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+    return productionRecords
+      .filter(r => new Date(dateToISODate(r.date)) >= new Date(dateToISODate(startOfWeek)))
+      .reduce((sum, r) => sum + Number(r.meters_printed || 0), 0);
+  };
 
-const getMetersYesterday = () => getMetersByDate(yesterday.toISOString().slice(0,10));
-const getMetersToday = () => getMetersByDate(today.toISOString().slice(0,10));
-const getMetersTotal = () =>
-  productionRecords.reduce((sum, r) => sum + Number(r.meters_printed), 0);
+  const getMetersThisMonth = () => {
+    const month = today.getMonth();
+    const year = today.getFullYear();
+    return productionRecords
+      .filter(r => {
+        const d = new Date(r.date);
+        return d.getMonth() === month && d.getFullYear() === year;
+      })
+      .reduce((sum, r) => sum + Number(r.meters_printed || 0), 0);
+  };
+
+  const getMetersYesterday = () => getMetersByDate(dateToISODate(yesterday));
+  const getMetersToday = () => getMetersByDate(dateToISODate(today));
+  const getMetersTotal = () =>
+    productionRecords.reduce((sum, r) => sum + Number(r.meters_printed || 0), 0);
 
   if (isLoading) {
     return (

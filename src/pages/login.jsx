@@ -20,7 +20,25 @@ export default function Login() {
     setLoading(true);
 
     try {
-      // Intentamos autenticar con la función RPC 'check_user_password' que compara password_hash
+      // 1) Intentar autenticación vía Supabase Auth (email/password)
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({ email: username, password });
+        if (!error && data?.session) {
+          // session established
+          // Optionally save currentUser in localStorage for compatibility
+          const user = data.session.user;
+          try {
+            localStorage.setItem('currentUser', JSON.stringify({ id: user.id, email: user.email, name: user.user_metadata?.name || user.email }));
+            localStorage.setItem('isAuthenticated', 'true');
+          } catch(e) {}
+          navigate('/');
+          return;
+        }
+      } catch (authErr) {
+        console.warn('Supabase auth signIn failed or not configured:', authErr);
+      }
+
+      // 2) Intentamos autenticar con la función RPC 'check_user_password' que compara password_hash (fallback)
       try {
         const rpcRes = await supabase.rpc('check_user_password', { p_identifier: username, p_password: password });
         if (!rpcRes.error && rpcRes.data) {
@@ -38,10 +56,9 @@ export default function Login() {
         }
       } catch (rpcErr) {
         console.warn('RPC check_user_password call failed:', rpcErr);
-        // proceed to fallback
       }
 
-      // Fallback: si no existe la tabla o el usuario en la tabla, usar credenciales de desarrollo
+      // 3) Fallback: credenciales de desarrollo local
       if (username === VALID_USERNAME && password === VALID_PASSWORD) {
         localStorage.setItem('isAuthenticated', 'true');
         localStorage.setItem('currentUser', JSON.stringify({ id: 'local-admin', username: VALID_USERNAME, role: 'admin', name: 'Local Admin' }));

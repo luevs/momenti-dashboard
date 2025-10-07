@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Modal from '../components/Modal';
 import { supabase } from '../supabaseClient';
+import useCurrentUser from '../utils/useCurrentUser';
 
 export default function Usuarios() {
   const [q, setQ] = useState('');
@@ -23,9 +24,7 @@ export default function Usuarios() {
   const [editEmail, setEditEmail] = useState('');
   const [editRole, setEditRole] = useState('operator');
   const [editActive, setEditActive] = useState(true);
-  // Leer usuario actual desde localStorage para determinar permisos
-  const rawCurrent = typeof window !== 'undefined' ? localStorage.getItem('currentUser') : null;
-  const currentUser = rawCurrent ? JSON.parse(rawCurrent) : null;
+  const currentUser = useCurrentUser();
   const isAdmin = currentUser?.role === 'admin';
 
   useEffect(() => {
@@ -155,13 +154,6 @@ export default function Usuarios() {
 
       // Try an RPC that performs the audit-log + delete in one transaction (recommended)
       // If you add this RPC server-side, it should accept (p_user_id, p_deleted_by, p_reason)
-      let currentUser = null;
-      try {
-        currentUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
-      } catch (e) {
-        currentUser = null;
-      }
-
       const rpcParams = {
         p_user_id: selectedUser.id,
         p_deleted_by: (currentUser && (currentUser.id || currentUser.user_id || currentUser.username)) || null,

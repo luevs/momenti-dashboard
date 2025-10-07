@@ -22,11 +22,45 @@ import ClienteDetalle from "./pages/ClienteDetalle";
 // TEMPORAL: Página de migración (ELIMINAR DESPUÉS DE USAR)
 import MigrationPage from "./pages/MigrationPage";
 
-// Componente para proteger rutas (usa flag localStorage para dev)
+// Componente para proteger rutas usando Supabase Auth session
 const PrivateRoute = ({ children }) => {
-  // En este entorno de desarrollo aceptamos el flag localStorage
-  const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
-  return isAuthenticated ? children : <Navigate to="/login" />;
+  // undefined = loading, null = not authenticated, object = session
+  const [session, setSession] = useState(undefined);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        setSession(data?.session ?? null);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setSession(null);
+      });
+
+    const { data } = supabase.auth.onAuthStateChange((_event, s) => {
+      // s may be a Session object or { session }
+      setSession(s?.session ?? s ?? null);
+    });
+
+    const subscription = data?.subscription;
+
+    return () => {
+      mounted = false;
+      if (subscription && typeof subscription.unsubscribe === 'function') subscription.unsubscribe();
+    };
+  }, []);
+
+  // loading
+  if (session === undefined) return null; // or a spinner
+
+  // not authenticated: allow legacy localStorage flag for compatibility while migrating
+  const legacyAuth = (typeof window !== 'undefined') && localStorage.getItem('isAuthenticated') === 'true';
+  if (session === null && !legacyAuth) return <Navigate to="/login" />;
+
+  return children;
 };
 
 function App() {
