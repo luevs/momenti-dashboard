@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import useCurrentUser from '../utils/useCurrentUser';
 import { generateTicketHTML } from '../utils/ticketUtils';
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
@@ -70,10 +71,8 @@ const formatDate = (dateString) => {
   return 'Fecha inválida';
 };
 
-// Función para obtener usuario actual (personalizar según tu sistema de auth)
-const getCurrentUser = () => {
-  return localStorage.getItem('currentUser') || 'Sistema';
-};
+// Usar hook centralizado para obtener el usuario actual
+// (fallbacks handled in the hook)
 
 function getExpiringThreshold(totalMeters) {
   if (totalMeters <= 5) return 0.5;
@@ -83,6 +82,7 @@ function getExpiringThreshold(totalMeters) {
 }
 
 export default function ClientesLealtad() {
+  const currentUser = useCurrentUser();
   const [allClients, setAllClients] = useState([]);
   const [clientes, setClientes] = useState([]); // filtrados por tipo
   const [modalOpen, setModalOpen] = useState(false);
@@ -114,7 +114,7 @@ export default function ClientesLealtad() {
   
   // Estados para el modal de pedido mejorado
   const [observaciones, setObservaciones] = useState("");
-  const [registeredBy, setRegisteredBy] = useState(getCurrentUser());
+  const [registeredBy, setRegisteredBy] = useState(() => currentUser?.name || currentUser?.email || 'Sistema');
   const [registeredByCustom, setRegisteredByCustom] = useState("");
 
   // Nuevos estados para el historial global

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText, Package, AlertTriangle } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import useCurrentUser from '../utils/useCurrentUser';
 import { useParams } from "react-router-dom";
 import { Bar } from 'react-chartjs-2'; // Si quieres usar Chart.js (opcional)
 
@@ -13,6 +14,7 @@ function getLocalDateString(date = new Date()) {
 
 export default function MaquinaDetalle() {
   const { id } = useParams();
+  const currentUser = useCurrentUser();
   const [machines, setMachines] = useState([]);
   const [machineSupplies, setMachineSupplies] = useState([]);
   const [supplyTypes, setSupplyTypes] = useState([]);
@@ -100,7 +102,7 @@ export default function MaquinaDetalle() {
     const dateStr = typeof record.date === "string" ? record.date.slice(0,10) : getLocalDateString(new Date(record.date));
     setEditDate(dateStr);
     setEditMeters(String(record.meters_printed ?? ""));
-    setEditRegisteredBy(record.registered_by ?? "");
+    setEditRegisteredBy(record.registered_by ?? (currentUser?.name || currentUser?.email || ""));
     setEditError("");
     setEditRecordModalOpen(true);
   };
@@ -301,7 +303,7 @@ export default function MaquinaDetalle() {
     setSupplierName("");
     setUnitCost("");
     setNotes("");
-    setRecordedBy("Sistema");
+    setRecordedBy(currentUser?.name || currentUser?.email || "Sistema");
   };
 
   // Cerrar modal de reposición
@@ -481,7 +483,7 @@ export default function MaquinaDetalle() {
             current_stock: parseFloat(initialStock),
             minimum_level: parseFloat(minimumLevel),
             critical_level: parseFloat(criticalLevel),
-            updated_by: "Admin"
+            updated_by: currentUser?.name || currentUser?.email || "Admin"
           }
         ]);
 
@@ -499,7 +501,7 @@ export default function MaquinaDetalle() {
             quantity_after: parseFloat(initialStock),
             quantity_changed: parseFloat(initialStock),
             notes: 'Configuración inicial del insumo',
-            recorded_by: 'Admin'
+            recorded_by: currentUser?.name || currentUser?.email || 'Admin'
           }
         ]);
 
@@ -1373,7 +1375,7 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
                         machine_id: selectedMachine.id,
                         date: getLocalDateString(new Date()),
                         meters_printed: Number(metrosHoy),
-                        registered_by: localStorage.getItem('currentUser') || 'Sistema'
+                        registered_by: currentUser?.name || currentUser?.email || 'Sistema'
                       }]);
                     if (error) {
                       setCorteError("Error al guardar el corte: " + error.message);

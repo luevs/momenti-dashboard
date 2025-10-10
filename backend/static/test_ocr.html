@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test OCR Service</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .upload-area:hover {
+            border-color: #007bff;
+            background-color: #f8f9fa;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        pre {
+            background-color: #f1f1f1;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test Servidor OCR Flask</h1>
+    
+    <div>
+        <h2>1. Health Check</h2>
+        <button onclick="testHealth()">Probar Health</button>
+        <div id="healthResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div>
+        <h2>2. Upload de Imagen OCR</h2>
+        <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+            <p>📁 Haz clic aquí para seleccionar una imagen</p>
+            <p><small>Formatos: PNG, JPG, GIF, BMP</small></p>
+        </div>
+        <input type="file" id="fileInput" accept="image/*" style="display: none;" onchange="handleFileSelect(event)">
+        
+        <div id="fileInfo" style="display: none;">
+            <p><strong>Archivo seleccionado:</strong> <span id="fileName"></span></p>
+            <img id="preview" style="max-width: 300px; max-height: 200px; border: 1px solid #ccc; border-radius: 5px;">
+            <br><br>
+            <button id="uploadBtn" onclick="uploadFile()" disabled>🚀 Procesar con OCR</button>
+        </div>
+        
+        <div id="uploadResult" class="result" style="display: none;"></div>
+    </div>
+
+    <script>
+        let selectedFile = null;
+
+        async function testHealth() {
+            const resultDiv = document.getElementById('healthResult');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '⏳ Probando conexión...';
+            resultDiv.className = 'result';
+
+            try {
+                const response = await fetch('http://localhost:5000/health');
+                const data = await response.json();
+                
+                resultDiv.innerHTML = `
+                    <h3>✅ Servidor funcionando</h3>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+                resultDiv.className = 'result success';
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <h3>❌ Error de conexión</h3>
+                    <p>No se puede conectar al servidor Flask.</p>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                    <p><strong>Solución:</strong> Verifica que el servidor esté ejecutándose en http://localhost:5000</p>
+                `;
+                resultDiv.className = 'result error';
+            }
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            selectedFile = file;
+            
+            // Mostrar información del archivo
+            document.getElementById('fileName').textContent = file.name;
+            document.getElementById('fileInfo').style.display = 'block';
+            
+            // Mostrar preview
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('preview').src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+            
+            // Habilitar botón
+            document.getElementById('uploadBtn').disabled = false;
+        }
+
+        async function uploadFile() {
+            if (!selectedFile) return;
+
+            const resultDiv = document.getElementById('uploadResult');
+            const uploadBtn = document.getElementById('uploadBtn');
+            
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '⏳ Procesando imagen con OCR...';
+            resultDiv.className = 'result';
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = '⏳ Procesando...';
+
+            try {
+                const formData = new FormData();
+                formData.append('preview', selectedFile);
+
+                const response = await fetch('http://localhost:5000/api/upload-preview', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                resultDiv.innerHTML = `
+                    <h3>✅ OCR Completado</h3>
+                    <p><strong>Job ID:</strong> ${data.job_id}</p>
+                    <p><strong>Confianza:</strong> ${data.ocr_results.confidence.toFixed(1)}%</p>
+                    
+                    <h4>📊 Información Extraída:</h4>
+                    <ul>
+                        <li><strong>Cliente:</strong> ${data.ocr_results.client_name || 'No detectado'}</li>
+                        <li><strong>Descripción:</strong> ${data.ocr_results.job_description || 'No detectado'}</li>
+                        <li><strong>Cantidad:</strong> ${data.ocr_results.quantity || 'No detectado'}</li>
+                        <li><strong>Material:</strong> ${data.ocr_results.material || 'No detectado'}</li>
+                        <li><strong>Tamaño:</strong> ${data.ocr_results.size || 'No detectado'}</li>
+                        <li><strong>Fecha límite:</strong> ${data.ocr_results.deadline || 'No detectado'}</li>
+                    </ul>
+                    
+                    <details>
+                        <summary>🔍 Ver texto completo detectado</summary>
+                        <pre>${data.ocr_results.detected_text}</pre>
+                    </details>
+                    
+                    <details>
+                        <summary>🔧 Ver respuesta completa</summary>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    </details>
+                `;
+                resultDiv.className = 'result success';
+                
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <h3>❌ Error en OCR</h3>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                    <p><strong>Archivo:</strong> ${selectedFile.name}</p>
+                    <p><strong>Tamaño:</strong> ${(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                `;
+                resultDiv.className = 'result error';
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = '🚀 Procesar con OCR';
+            }
+        }
+
+        // Auto-test health al cargar la página
+        window.onload = function() {
+            testHealth();
+        };
+    </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import { Printer, Plus, X } from "lucide-react";
+import { Printer, Plus, X, Eye, Play, Check, XCircle, RefreshCw } from "lucide-react";
 import MaquinaCard from '../components/MaquinaCard';
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
@@ -39,6 +39,13 @@ export default function Maquinas() {
   const [corteFecha, setCorteFecha] = useState(new Date().toISOString().slice(0,10));
   const [registroFecha, setRegistroFecha] = useState(new Date().toISOString().slice(0, 10));
   const [latestRecords, setLatestRecords] = useState({}); // { [machineId]: { date, meters_printed, registered_by } }
+  const [queues, setQueues] = useState({}); // { [machineId]: array of jobs }
+  const [queueModalOpen, setQueueModalOpen] = useState(false);
+  const [queueMachine, setQueueMachine] = useState(null);
+  const [queueItems, setQueueItems] = useState([]);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueError, setQueueError] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
 
   const navigate = useNavigate();
   const currentUser = useCurrentUser();
@@ -70,6 +77,81 @@ export default function Maquinas() {
   useEffect(() => {
     fetchLatestRecords();
   }, [impresoras]);
+
+  // fetch queue per machine
+  const fetchQueues = async () => {
+    try {
+      const ids = impresoras.map(i => i.id);
+      if (!ids.length) { setQueues({}); return; }
+      const { data, error } = await supabase
+        .from('machine_job_queue')
+        .select('*')
+        .in('machine_id', ids)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true });
+      if (error) {
+        console.error('fetchQueues error', error);
+        return;
+      }
+      const map = {};
+      (data || []).forEach(j => {
+        if (!map[j.machine_id]) map[j.machine_id] = [];
+        map[j.machine_id].push(j);
+      });
+      setQueues(map);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    fetchQueues();
+  }, [impresoras]);
+
+  const openQueueModal = async (machine) => {
+    setQueueMachine(machine);
+    setQueueModalOpen(true);
+    await loadQueueForMachine(machine.id);
+  };
+
+  const loadQueueForMachine = async (machineId) => {
+    try {
+      setQueueLoading(true);
+      setQueueError('');
+      // include pending and in_progress by default; optionally include done/canceled if showHistory
+      let query = supabase
+        .from('machine_job_queue')
+        .select('*')
+        .eq('machine_id', machineId)
+        .order('created_at', { ascending: true });
+      if (!showHistory) {
+        query = query.in('status', ['pending', 'in_progress']);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      setQueueItems(data || []);
+    } catch (e) {
+      console.error(e);
+      setQueueError(e.message || 'Error cargando cola');
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  const updateJobStatus = async (jobId, status) => {
+    try {
+      const { error } = await supabase
+        .from('machine_job_queue')
+        .update({ status })
+        .eq('id', jobId);
+      if (error) throw error;
+      // refresh modal list and cards summary
+      if (queueMachine) await loadQueueForMachine(queueMachine.id);
+      await fetchQueues();
+    } catch (e) {
+      alert(e.message || 'Error actualizando estado');
+    }
+  };
 
   const agregarImpresora = () => {
     const nueva = {
@@ -182,7 +264,11 @@ export default function Maquinas() {
           return (
             <div
               key={impresora.id}
-              className="p-4 bg-white shadow rounded-xl border border-gray-200 transition"
+              className="p-4 bg-white shadow rounded-xl border border-gray-200 transition cursor-pointer hover:shadow-md"
+              onClick={() => navigate(`/maquinas/${impresora.id}`)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate(`/maquinas/${impresora.id}`); }}
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-3">
@@ -201,16 +287,36 @@ export default function Maquinas() {
                 {/* indicador pequeño */}
                 <div className="flex flex-col items-end">
                   <span className={`w-3 h-3 rounded-full ${registeredToday ? 'bg-green-500' : 'bg-red-400'}`} title={registeredToday ? 'Registrado hoy' : 'No registrado hoy'}></span>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); navigate(`/maquinas/${impresora.id}`); }}
-                    className="text-xs text-blue-600 mt-2 hover:underline"
-                  >
-                    Ver Historial
-                  </button>
                 </div>
               </div>
 
+              <div className="mt-3 text-sm text-gray-600">
+                {Array.isArray(queues[impresora.id]) && queues[impresora.id].length > 0 ? (
+                  <>
+                    {(() => {
+                      const totalMeters = queues[impresora.id].reduce((sum, q) => sum + (Number(q.quantity_m) || 0), 0);
+                      return (
+                        <div className="font-medium">En cola: {queues[impresora.id].length} · {totalMeters.toFixed(2)} m</div>
+                      );
+                    })()}
+                    <ul className="list-disc ml-5 mt-1">
+                      {queues[impresora.id].slice(0,3).map(q => (
+                        <li key={q.id}>{q.client_name} — {q.quantity_m} m {q.job_code ? `· ${q.job_code}` : ''}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <div className="text-gray-400">Sin trabajos en cola</div>
+                )}
+              </div>
+
               <div className="mt-4 flex gap-2">
+                <button
+                  onClick={e => { e.stopPropagation(); openQueueModal(impresora); }}
+                  className="flex-1 px-3 py-2 bg-gray-100 text-gray-800 rounded hover:bg-gray-200 text-sm"
+                >
+                  <div className="flex items-center justify-center gap-2"><Eye size={16}/> Ver cola</div>
+                </button>
                 <button
                   onClick={e => {
                     e.stopPropagation();
@@ -311,6 +417,80 @@ export default function Maquinas() {
                 Agregar impresora
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL COLA COMPLETA */}
+      {queueModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
+          <div className="bg-white p-6 rounded-xl w-full max-w-2xl shadow-lg relative">
+            <button
+              onClick={() => setQueueModalOpen(false)}
+              className="absolute top-3 right-3 text-gray-500 hover:text-black"
+            >
+              <X />
+            </button>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xl font-semibold">Cola de {queueMachine?.nombre || 'máquina'}</h2>
+              <div className="flex items-center gap-3 text-sm">
+                <label className="flex items-center gap-1">
+                  <input type="checkbox" checked={showHistory} onChange={async (e)=>{ setShowHistory(e.target.checked); if(queueMachine) await loadQueueForMachine(queueMachine.id); }} />
+                  Mostrar historial
+                </label>
+                <button className="px-2 py-1 border rounded text-gray-700 hover:bg-gray-50" onClick={()=> queueMachine && loadQueueForMachine(queueMachine.id)}>
+                  <div className="flex items-center gap-1"><RefreshCw size={14}/> Refrescar</div>
+                </button>
+              </div>
+            </div>
+            {queueLoading ? (
+              <div className="text-center py-6 text-gray-500">Cargando…</div>
+            ) : queueError ? (
+              <div className="text-red-600 text-sm">{queueError}</div>
+            ) : (
+              <div className="max-h-[60vh] overflow-y-auto">
+                {['in_progress','pending','done','canceled'].filter(st => showHistory || ['in_progress','pending'].includes(st)).map(section => {
+                  const items = (queueItems||[]).filter(i => i.status === section);
+                  if (!items.length) return null;
+                  const titleMap = { pending: 'Pendientes', in_progress: 'En progreso', done: 'Completados', canceled: 'Cancelados' };
+                  return (
+                    <div key={section} className="mb-4">
+                      <div className="text-sm font-semibold text-gray-700 mb-2">{titleMap[section]} ({items.length})</div>
+                      <ul className="space-y-2">
+                        {items.map(i => (
+                          <li key={i.id} className="p-3 border rounded flex items-center justify-between">
+                            <div className="text-sm">
+                              <div className="font-medium">{i.client_name} — {Number(i.quantity_m).toFixed(2)} m {i.job_code ? `· ${i.job_code}` : ''}</div>
+                              <div className="text-xs text-gray-500">{new Date(i.created_at).toLocaleString()} · {i.status}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {i.status === 'pending' && (
+                                <button className="px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded hover:bg-yellow-200" onClick={()=> updateJobStatus(i.id,'in_progress')}>
+                                  <div className="flex items-center gap-1"><Play size={14}/> Iniciar</div>
+                                </button>
+                              )}
+                              {['pending','in_progress'].includes(i.status) && (
+                                <button className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200" onClick={()=> updateJobStatus(i.id,'done')}>
+                                  <div className="flex items-center gap-1"><Check size={14}/> Completar</div>
+                                </button>
+                              )}
+                              {['pending','in_progress'].includes(i.status) && (
+                                <button className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200" onClick={()=> updateJobStatus(i.id,'canceled')}>
+                                  <div className="flex items-center gap-1"><XCircle size={14}/> Cancelar</div>
+                                </button>
+                              )}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+                {(!queueItems || queueItems.length === 0) && (
+                  <div className="text-sm text-gray-500">Sin trabajos.</div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

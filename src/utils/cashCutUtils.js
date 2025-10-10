@@ -29,7 +29,20 @@ export const generateUUID = () => {
 
 // Obtener usuario actual (desarrollo)
 export const getCurrentUser = () => {
-  return localStorage.getItem('currentUser') || 'Sistema';
+  try {
+    if (typeof window === 'undefined') return 'Sistema';
+    const raw = localStorage.getItem('currentUser');
+    if (!raw) return 'Sistema';
+    // raw may be a JSON string or a plain name
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed?.name || parsed?.email || String(parsed) || 'Sistema';
+    } catch (e) {
+      return String(raw) || 'Sistema';
+    }
+  } catch {
+    return 'Sistema';
+  }
 };
 
 // Formatear fecha para mostrar

@@ -4,7 +4,7 @@ export function getCurrentUser() {
   try {
     const raw = localStorage.getItem('currentUser');
     return raw ? JSON.parse(raw) : null;
-  } catch (e) {
+  } catch {
     return null;
   }
 }

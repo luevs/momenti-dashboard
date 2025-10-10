@@ -1,64 +1,41 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Printer, BarChart2, ClipboardList, Users, Settings, DollarSign, Package2, LogOut } from 'lucide-react';
+import { LayoutDashboard, Printer, BarChart2, ClipboardList, Users, Settings, DollarSign, Package2, LogOut, FileImage } from 'lucide-react';
 import { isAdmin } from '../utils/auth';
 import { supabase } from '../supabaseClient';
+import useCurrentUser from '../utils/useCurrentUser';
 
 export default function Layout({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Prefer session user from Supabase; fallback to localStorage
-  const [currentUser, setCurrentUser] = useState(null);
-
-  useEffect(() => {
-    let mounted = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      const session = data.session;
-      if (session && session.user) {
-        // session.user has email and user metadata; prefer metadata.name if present
-        const user = session.user;
-        const meta = (user.user_metadata) || {};
-        setCurrentUser({
-          id: user.id,
-          email: user.email,
-          name: meta.name || meta.full_name || user.email,
-          role: (meta.role || (localStorage.getItem('currentUser') ? JSON.parse(localStorage.getItem('currentUser')).role : null))
-        });
-      } else {
-        // fallback: read existing localStorage used previously
-        try {
-          const raw = typeof window !== 'undefined' ? localStorage.getItem('currentUser') : null;
-          setCurrentUser(raw ? JSON.parse(raw) : null);
-        } catch (e) {
-          setCurrentUser(null);
-        }
-      }
-    }).catch(() => {
-      try {
-        const raw = typeof window !== 'undefined' ? localStorage.getItem('currentUser') : null;
-        setCurrentUser(raw ? JSON.parse(raw) : null);
-      } catch (e) {
-        setCurrentUser(null);
-      }
-    });
-
-    return () => { mounted = false; };
-  }, []);
+  const currentUser = useCurrentUser();
+  // Keep any submenu open while moving the mouse to it; close with a slight delay
+  const [openSubmenu, setOpenSubmenu] = React.useState(null); // stores parent path
+  const hoverTimeoutRef = React.useRef(null);
 
   const menuItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-    { path: '/maquinas', label: 'Maquinas', icon: Printer },
+    {
+      path: '/maquinas', label: 'Maquinas', icon: Printer,
+      children: [
+        { path: '/operacion', label: 'Operación', icon: BarChart2 },
+        { path: '/trabajo-ocr', label: 'Trabajos OCR', icon: FileImage },
+        { path: '/insumos', label: 'Insumos', icon: Package2 },
+      ]
+    },
     { path: '/reportes', label: 'Reportes', icon: BarChart2 },
-    { path: '/clientes', label: 'Clientes', icon: ClipboardList },
-    { path: '/clientes-lealtad', label: 'Clientes Lealtad', icon: Users },
+    {
+      path: '/clientes', label: 'Clientes', icon: ClipboardList,
+      children: [
+        { path: '/clientes-lealtad', label: 'Clientes Lealtad', icon: Users },
+      ]
+    },
     { path: '/corte', label: 'Corte', icon: DollarSign },
-    ...(isAdmin() ? [
+    ...( (currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin')) || isAdmin() ? [
       { path: '/configuracion', label: 'Configuración', icon: Settings },
       { path: '/usuarios', label: 'Usuarios', icon: Users },
     ] : []),
-    { path: '/insumos', label: 'Insumos', icon: Package2 },
   ];
 
   const handleLogout = async () => {
@@ -81,12 +58,61 @@ export default function Layout({ children }) {
         <nav className="space-y-2">
           {menuItems.map((item) => {
             const Icon = item.icon;
+            const isActive = (p, it) => location.pathname === p || (it.children && it.children.some(c => location.pathname.startsWith(c.path)));
+            if (item.children && item.children.length) {
+              return (
+                <div
+                  key={item.path}
+                  className="relative"
+                  onMouseEnter={() => {
+                    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                    setOpenSubmenu(item.path);
+                  }}
+                  onMouseLeave={() => {
+                    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                    hoverTimeoutRef.current = setTimeout(() => {
+                      setOpenSubmenu((curr) => (curr === item.path ? null : curr));
+                    }, 200);
+                  }}
+                >
+                  <Link
+                    to={item.path}
+                    className={`flex items-center justify-between px-4 py-2 rounded ${
+                      isActive(item.path, item)
+                        ? 'bg-blue-100 text-blue-700 font-semibold'
+                        : 'hover:bg-gray-100'
+                    }`}
+                  >
+                    <span className="flex items-center gap-3">
+                      {Icon && <Icon size={20} />}
+                      <span>{item.label}</span>
+                    </span>
+                    <span className="text-gray-400">▸</span>
+                  </Link>
+                  <div
+                    className={`${openSubmenu === item.path ? 'block' : 'hidden'} absolute left-full top-0 ml-2 bg-white text-gray-800 border border-gray-200 rounded-md shadow-lg py-2 min-w-[180px] z-50`}
+                  >
+                    {item.children.map((sub) => (
+                      <Link
+                        key={sub.path}
+                        to={sub.path}
+                        onClick={() => setOpenSubmenu(null)}
+                        className={`flex items-center gap-2 px-4 py-2 text-sm hover:bg-gray-50 ${location.pathname === sub.path ? 'bg-gray-100 font-medium' : ''}`}
+                      >
+                        {sub.icon && <sub.icon size={16} />}
+                        <span>{sub.label}</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
             return (
               <Link
                 key={item.path}
                 to={item.path}
                 className={`flex items-center gap-3 px-4 py-2 rounded ${
-                  location.pathname === item.path
+                  isActive(item.path, item)
                     ? 'bg-blue-100 text-blue-700 font-semibold'
                     : 'hover:bg-gray-100'
                 }`}

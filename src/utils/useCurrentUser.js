@@ -28,7 +28,7 @@ export default function useCurrentUser() {
       try {
         const raw = typeof window !== 'undefined' ? localStorage.getItem('currentUser') : null;
         setUser(raw ? JSON.parse(raw) : null);
-      } catch (e) {
+      } catch {
         setUser(null);
       }
     });

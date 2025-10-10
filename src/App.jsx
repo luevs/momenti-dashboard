@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from './supabaseClient';
 
 import Dashboard from "./pages/Dashboard";
+import Operacion from "./pages/Operacion";
 import Maquinas from "./pages/Maquinas";
 import Reportes from "./pages/Reportes";
 import Configuracion from "./pages/Configuracion";
@@ -18,6 +19,9 @@ import Usuarios from "./pages/Usuarios";
 // NUEVOS: pages de Clientes (asegúrate que existan los archivos)
 import Clientes from "./pages/Clientes";
 import ClienteDetalle from "./pages/ClienteDetalle";
+
+// Página de OCR para trabajos de impresión
+import TrabajoOCR from "./pages/TrabajoOCR";
 
 // TEMPORAL: Página de migración (ELIMINAR DESPUÉS DE USAR)
 import MigrationPage from "./pages/MigrationPage";
@@ -81,6 +85,11 @@ function App() {
             <Layout><Maquinas /></Layout>
           </PrivateRoute>
         } />
+        <Route path="/operacion" element={
+          <PrivateRoute>
+            <Layout><Operacion /></Layout>
+          </PrivateRoute>
+        } />
         <Route path="/maquinas/:id" element={
           <PrivateRoute>
             <Layout><MaquinaDetalle /></Layout>
@@ -139,6 +148,13 @@ function App() {
         <Route path="/clientes/:id" element={
           <PrivateRoute>
             <Layout><ClienteDetalle /></Layout>
+          </PrivateRoute>
+        } />
+
+        {/* RUTA OCR TRABAJOS */}
+        <Route path="/trabajo-ocr" element={
+          <PrivateRoute>
+            <Layout><TrabajoOCR /></Layout>
           </PrivateRoute>
         } />
 
