@@ -7,6 +7,7 @@ export default function Operacion() {
   const navigate = useNavigate();
   const [board, setBoard] = useState([]); // rows from v_operator_machine_board
   const [queues, setQueues] = useState({}); // { [machineId]: Job[] }
+  const [metersToday, setMetersToday] = useState({}); // { [machineId]: number }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -38,6 +39,12 @@ export default function Operacion() {
     return map;
   };
 
+  const getLocalISODate = () => {
+    const now = new Date();
+    const tzOffsetMs = now.getTimezoneOffset() * 60000;
+    return new Date(now.getTime() - tzOffsetMs).toISOString().slice(0, 10);
+  };
+
   const load = async () => {
     try {
       setLoading(true); setError('');
@@ -46,6 +53,8 @@ export default function Operacion() {
       const ids = b.map(r => r.machine_id);
       const q = await fetchQueues(ids);
       setQueues(q);
+      const m = await fetchMetersToday(ids);
+      setMetersToday(m);
     } catch (e) {
       console.error(e);
       setError(e.message || 'Error cargando tablero');
@@ -61,7 +70,7 @@ export default function Operacion() {
   };
 
   // Helpers for tiraje (run) management
-  const today = new Date().toISOString().slice(0,10);
+  const today = getLocalISODate();
 
   const getNextSequence = async (machineId, runDate = today) => {
     const { data, error } = await supabase
@@ -93,6 +102,14 @@ export default function Operacion() {
       if (activeRunId) {
         const { error } = await supabase.from('machine_runs').update({ status: 'active' }).eq('id', activeRunId);
         if (error) throw error;
+        // asignar run_id a pendientes sin tiraje
+        const { error: assignErr } = await supabase
+          .from('machine_job_queue')
+          .update({ run_id: activeRunId })
+          .eq('machine_id', row.machine_id)
+          .is('run_id', null)
+          .eq('status', 'pending');
+        if (assignErr) throw assignErr;
         // mover todos los pendientes del tiraje a in_progress
         const { error: updErr } = await supabase
           .from('machine_job_queue')
@@ -125,12 +142,12 @@ export default function Operacion() {
       // 1) Completar tiraje actual
       const { error } = await supabase.from('machine_runs').update({ status: 'completed' }).eq('id', row.run_id);
       if (error) throw error;
-      // 2) Marcar todos los jobs del tiraje como 'done' (pendientes o en proceso)
+      // 2) Marcar todos los jobs abiertos de la máquina como 'done' (pendientes o en proceso),
+      // independientemente del run_id, para vaciar por completo la tarjeta
       const { error: updErr } = await supabase
         .from('machine_job_queue')
         .update({ status: 'done' })
         .eq('machine_id', row.machine_id)
-        .eq('run_id', row.run_id)
         .in('status', ['pending', 'in_progress']);
       if (updErr) throw updErr;
       await load();
@@ -142,6 +159,20 @@ export default function Operacion() {
   const createNextRun = (row) => {
     const params = new URLSearchParams({ machineId: String(row.machine_id), runDate: row.run_date || today });
     navigate(`/trabajo-ocr?${params.toString()}`);
+  };
+
+  const fetchMetersToday = async (machineIds) => {
+    if (!machineIds.length) return {};
+    const dateStr = today; // local ISO date
+    const { data, error } = await supabase
+      .from('machine_daily_prints')
+      .select('machine_id, date, meters_printed')
+      .in('machine_id', machineIds)
+      .eq('date', dateStr);
+    if (error) throw error;
+    const map = {};
+    (data || []).forEach(r => { map[r.machine_id] = Number(r.meters_printed) || 0; });
+    return map;
   };
 
   return (
@@ -169,6 +200,7 @@ export default function Operacion() {
                 <div className="text-right">
                   <div className="text-sm">Abiertos: <b>{m.total_open_jobs || 0}</b></div>
                   <div className="text-sm">Metros: <b>{m.total_open_meters || 0}</b></div>
+                  <div className="text-sm">Impresos hoy: <b>{metersToday[m.machine_id] || 0}</b></div>
                   <div className="mt-2 flex items-center gap-2 justify-end">
                     {m.run_status === 'active' ? (
                       <button onClick={() => completeRun(m)} title="Terminar tiraje" className="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 flex items-center gap-1">

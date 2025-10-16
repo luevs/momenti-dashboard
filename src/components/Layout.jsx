@@ -20,7 +20,7 @@ export default function Layout({ children }) {
       path: '/maquinas', label: 'Maquinas', icon: Printer,
       children: [
         { path: '/operacion', label: 'Operación', icon: BarChart2 },
-        { path: '/trabajo-ocr', label: 'Trabajos OCR', icon: FileImage },
+        { path: '/trabajo-ocr', label: 'Carga de Tirajes', icon: FileImage },
         { path: '/insumos', label: 'Insumos', icon: Package2 },
       ]
     },

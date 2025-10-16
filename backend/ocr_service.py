@@ -238,22 +238,32 @@ class OCRService:
             clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
             enhanced = clahe.apply(denoised)
             
-            # Redimensionar imagen si es muy pequeña
+            # Redimensionar imagen para mejorar OCR en texto pequeño
             height, width = enhanced.shape
-            if height < 300 or width < 300:
-                scale_factor = max(300/height, 300/width, 2.0)
+            min_dim = 800  # eleva el mínimo para hacer más legible texto delgado
+            if height < min_dim or width < min_dim:
+                scale_factor = max(min_dim/height, min_dim/width, 2.0)
                 new_width = int(width * scale_factor)
                 new_height = int(height * scale_factor)
                 enhanced = cv2.resize(enhanced, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
                 self.logger.info(f"Resized image from {width}x{height} to {new_width}x{new_height}")
             
-            # Aplicar threshold más agresivo para texto
-            # Usar threshold binario simple para mejor legibilidad
-            _, thresh = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            
-            # Morfología para limpiar texto
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
-            processed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            # Aplicar threshold: Otsu + Adaptive y combinarlos para conservar trazos finos
+            _, otsu = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            adaptive = cv2.adaptiveThreshold(
+                enhanced,
+                255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                15,
+                8,
+            )
+            combined = cv2.bitwise_or(otsu, adaptive)
+
+            # Morfología: dilatación suave + cierre para engrosar texto y unir cortes
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            dilated = cv2.dilate(combined, kernel, iterations=1)
+            processed = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, kernel, iterations=1)
             
             # DEBUG: Guardar TODAS las etapas de procesamiento
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -272,8 +282,10 @@ class OCRService:
             # Guardar después de CLAHE
             cv2.imwrite(f"{debug_prefix}_04_enhanced.png", enhanced)
             
-            # Guardar después de threshold
-            cv2.imwrite(f"{debug_prefix}_05_threshold.png", thresh)
+            # Guardar después de thresholds
+            cv2.imwrite(f"{debug_prefix}_05_threshold_otsu.png", otsu)
+            cv2.imwrite(f"{debug_prefix}_05_threshold_adaptive.png", adaptive)
+            cv2.imwrite(f"{debug_prefix}_05_threshold_combined.png", combined)
             
             # Guardar imagen final procesada
             cv2.imwrite(f"{debug_prefix}_06_final.png", processed)
@@ -337,7 +349,13 @@ class OCRService:
                 ('no_lang', '--psm 6'),
                 ('psm_7', '--psm 7'),  # Línea de texto individual
                 ('psm_8', '--psm 8'),  # Palabra individual
-                ('psm_13', '--psm 13')  # Raw line, no hay formato
+                ('psm_11', '--psm 11'), # Sparse text
+                ('psm_12', '--psm 12'), # Sparse text con OSD
+                ('psm_13', '--psm 13'),  # Raw line, no hay formato
+                (
+                    'whitelist_codes',
+                    "--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_\.M"
+                ),
             ]
             
             best_text = text
@@ -540,8 +558,11 @@ class OCRService:
 
         def _normalize(s: str) -> str:
             s = s.replace('—', '-').replace('–', '-')
+            s = s.replace('·', '.').replace('•', '-')
             # espacios múltiples -> uno
             s = re.sub(r'[ \t]+', ' ', s)
+            # unir fecha ddmmaa si vino con espacios: U10 10 25-... -> U101025-...
+            s = re.sub(r'([A-Z])(\d{2})\s*(\d{2})\s*(\d{2})', r'\1\2\3\4', s)
             return s
 
         def _prettify_name(name_raw: str) -> str:
@@ -568,7 +589,7 @@ class OCRService:
         # Regex por línea: anclada; ignora lo que siga después de la M (fecha/hora de Windows)
         # Prefijo 1 letra (tipo), 6 dígitos fecha, guión, nombre en mayúsculas/guiones bajos, guión, cantidad decimal + 'M'
         JOB_LINE_RE = re.compile(
-            r"^\s*(?P<prefix>[A-Z])(?P<date>\d{6})-(?P<client>[A-ZÁÉÍÓÚÜÑ_]+)-(?P<qty>\d+(?:[\.,]\d+)?)\s*M\b.*$",
+            r"^\s*(?P<prefix>[A-Z])(?P<date>\d{6})-(?P<client>[A-ZÁÉÍÓÚÜÑ_]+)-(?P<qty>(?:\d+[\.,]\d+|\d+|[\.,]\d+))\s*M\b.*$",
             re.MULTILINE
         )
 
@@ -590,7 +611,11 @@ class OCRService:
             # cantidad en metros (float)
             qty_val = None
             try:
-                qty_val = float(qty_raw.replace(',', '.'))
+                # Permitir cantidades tipo .35 -> 0.35
+                q = qty_raw.replace(',', '.')
+                if q.startswith('.'):
+                    q = '0' + q
+                qty_val = float(q)
             except Exception:
                 qty_val = None
 

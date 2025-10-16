@@ -116,12 +116,8 @@ const TrabajoOCR = () => {
               <FileImage className="h-6 w-6 text-blue-600" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">
-                Procesador de Trabajos OCR
-              </h1>
-              <p className="text-gray-600">
-                Sube capturas de trabajos de impresión para procesarlos automáticamente
-              </p>
+              <h1 className="text-3xl font-bold text-gray-900">Carga de Tirajes</h1>
+              <p className="text-gray-600">Sube una captura para generar los trabajos y encolarlos por tiraje</p>
             </div>
           </div>
         </div>

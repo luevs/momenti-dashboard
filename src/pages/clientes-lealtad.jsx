@@ -83,6 +83,8 @@ function getExpiringThreshold(totalMeters) {
 
 export default function ClientesLealtad() {
   const currentUser = useCurrentUser();
+  // Helper centralizado para obtener un nombre identificable del usuario actual
+  const getCurrentUser = () => (currentUser?.name || currentUser?.email || 'Sistema');
   const [allClients, setAllClients] = useState([]);
   const [clientes, setClientes] = useState([]); // filtrados por tipo
   const [modalOpen, setModalOpen] = useState(false);
@@ -146,6 +148,8 @@ export default function ClientesLealtad() {
   const [activePrograms, setActivePrograms] = useState([]);
   const [metersToRegister, setMetersToRegister] = useState('');
   const [selectedProgramId, setSelectedProgramId] = useState('');
+  const [isSubmittingMeters, setIsSubmittingMeters] = useState(false);
+  const isSubmittingMetersRef = React.useRef(false);
 
   // Función para abrir modal de registro de metros (invocada desde CustomerLoyaltyCard)
   // customerOrId can be either a customer object or an id
@@ -193,12 +197,19 @@ export default function ClientesLealtad() {
     setActivePrograms(programs || []);
     setSelectedProgramId((programs && programs[0] && programs[0].id) ? programs[0].id : '');
     setMetersToRegister('');
+    isSubmittingMetersRef.current = false;
+    setIsSubmittingMeters(false);
     setRegisterMetersModalOpen(true);
   };
 
   // Manejar el envío del formulario de registro por programa
   const handleSubmitMeters = async (e) => {
     e.preventDefault();
+
+    if (isSubmittingMetersRef.current) {
+      // Prevent duplicate submissions triggered by double clicks / press
+      return;
+    }
 
     if (!selectedCustomerForMeters) {
       console.error('handleSubmitMeters called but selectedCustomerForMeters is null');
@@ -243,6 +254,8 @@ export default function ClientesLealtad() {
     }
 
     try {
+      isSubmittingMetersRef.current = true;
+      setIsSubmittingMeters(true);
       // calcular nuevos valores
   const newRemainingMeters = Number((selectedProgram.remaining_meters - metersUsed).toFixed(2));
       const newStatus = newRemainingMeters <= 0 ? 'completado' : 'activo';
@@ -371,6 +384,9 @@ export default function ClientesLealtad() {
     } catch (error) {
       console.error("Error inesperado al registrar metros:", error);
       alert("Error inesperado al registrar metros");
+    } finally {
+      setIsSubmittingMeters(false);
+      isSubmittingMetersRef.current = false;
     }
   };
 
@@ -2372,12 +2388,22 @@ export default function ClientesLealtad() {
                     setAutorizacionCliente(false);
                     setRegisteredBy(getCurrentUser());
                     setRegisteredByCustom('');
+                    isSubmittingMetersRef.current = false;
+                    setIsSubmittingMeters(false);
                   }}
                   className="px-4 py-2 rounded border hover:bg-gray-50"
                 >
                   Cancelar
                 </button>
-                <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                <button
+                  type="submit"
+                  disabled={isSubmittingMeters}
+                  className={`px-4 py-2 rounded text-white transition-colors ${
+                    isSubmittingMeters
+                      ? 'bg-blue-400 cursor-not-allowed'
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                >
                   Guardar Pedido
                 </button>
               </div>

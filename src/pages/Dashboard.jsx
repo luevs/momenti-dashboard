@@ -59,14 +59,14 @@ export default function Dashboard() {
       // fetch yesterday
       const { data: yesterdayData, error: yesterdayError } = await supabase
         .from("machine_daily_prints")
-        .select("meters_printed")
+        .select("machine_id, meters_printed")
         .eq("date", yesterdayStr);
       if (yesterdayError) throw yesterdayError;
 
       // fetch week range
       const { data: weekData, error: weekError } = await supabase
         .from("machine_daily_prints")
-        .select("meters_printed")
+        .select("machine_id, meters_printed")
         .gte("date", startOfWeekStr)
         .lte("date", todayStr);
       if (weekError) throw weekError;
@@ -74,7 +74,7 @@ export default function Dashboard() {
       // fetch month range
       const { data: monthData, error: monthError } = await supabase
         .from("machine_daily_prints")
-        .select("meters_printed")
+        .select("machine_id, meters_printed")
         .gte("date", startOfMonthStr)
         .lte("date", todayStr);
       if (monthError) throw monthError;

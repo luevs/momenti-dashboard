@@ -1,3 +1,11 @@
+-- Helper: local date for your operation timezone (adjust if needed)
+create or replace function public.app_local_date()
+returns date
+language sql
+as $$
+  select (now() at time zone 'America/Mexico_City')::date;
+$$;
+
 -- Function: ensure a run exists for a machine today; returns run id
 create or replace function public.ensure_today_run(p_machine_id int)
 returns uuid
@@ -6,7 +14,7 @@ as $$
 declare
   v_run_id uuid;
   v_seq int;
-  v_today date := (now() at time zone 'utc')::date;
+  v_today date := public.app_local_date();
 begin
   select id into v_run_id from public.machine_runs
   where machine_id = p_machine_id and run_date = v_today and status in ('planned','active')
@@ -104,7 +112,7 @@ returns trigger
 language plpgsql
 as $$
 declare
-  v_date date := (now() at time zone 'utc')::date;
+  v_date date := public.app_local_date();
 begin
   if tg_op = 'UPDATE' and new.status = 'done' and (old.status is distinct from 'done') then
     insert into public.machine_daily_prints(machine_id, date, meters_printed, registered_by, created_at, type)
