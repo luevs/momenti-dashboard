@@ -20,18 +20,157 @@ const TrabajoOCR = () => {
   const [runDate, setRunDate] = useState(() => new Date().toISOString().slice(0,10));
   const [runSequence, setRunSequence] = useState('');
   const [runName, setRunName] = useState('');
-  const totalMeters = useMemo(() => (parsedJobs || []).reduce((s, j) => s + (Number(j.quantity_m) || 0), 0), [parsedJobs]);
+  const decimalPattern = /^\d*(?:\.\d{0,2})?$/;
+  const sanitizeDecimalInput = (value) => (value ?? '').toString().replace(/[^0-9.,]/g, '').replace(/,/g, '.');
+  const normalizeDecimalDisplay = (value) => {
+    let sanitized = sanitizeDecimalInput(value);
+    if (sanitized.startsWith('.')) sanitized = `0${sanitized}`;
+    return sanitized;
+  };
+  const ensureTwoDecimalsNumber = (value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Number(numeric.toFixed(2)) : 0;
+  };
+  const ensureTwoDecimalsString = (value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric.toFixed(2) : '0.00';
+  };
+  // Valida fechas ISO para evitar enviar valores que rompan Supabase
+  const isoDatePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
+  const isValidIsoDate = (value) => {
+    if (typeof value !== 'string') return false;
+    const match = isoDatePattern.exec(value.trim());
+    if (!match) return false;
+    const [, yearStr, monthStr, dayStr] = match;
+    const year = Number(yearStr);
+    const month = Number(monthStr);
+    const day = Number(dayStr);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+    if (month < 1 || month > 12) return false;
+    if (day < 1 || day > 31) return false;
+    const parsed = new Date(`${yearStr}-${monthStr}-${dayStr}T00:00:00Z`);
+    return !Number.isNaN(parsed.getTime())
+      && parsed.getUTCFullYear() === year
+      && parsed.getUTCMonth() + 1 === month
+      && parsed.getUTCDate() === day;
+  };
+  const sanitizeJobDate = (value) => (isValidIsoDate(value) ? value : '');
+  const sanitizeJobDateOrNull = (value) => (isValidIsoDate(value) ? value : null);
+  const totalMeters = useMemo(() => {
+    const sum = (parsedJobs || []).reduce((s, j) => s + (Number(j.quantity_m) || 0), 0);
+    return Number(sum.toFixed(2));
+  }, [parsedJobs]);
   const [plannedMeters, setPlannedMeters] = useState(0);
+  const [plannedMetersTouched, setPlannedMetersTouched] = useState(false);
+  const [plannedMetersInput, setPlannedMetersInput] = useState('0.00');
+
+  const handleQuantityChange = (index, rawValue) => {
+    const display = normalizeDecimalDisplay(rawValue);
+    if (!decimalPattern.test(display)) return;
+
+    setParsedJobs(prev => {
+      const next = [...prev];
+      const job = next[index];
+      if (!job) return prev;
+      const numeric = display === '' || display === '0.' ? 0 : Number(display);
+      next[index] = {
+        ...job,
+        quantityInput: display,
+        quantity_m: Number.isFinite(numeric) ? numeric : 0,
+      };
+      return next;
+    });
+  };
+
+  const handleQuantityBlur = (index) => {
+    setParsedJobs(prev => {
+      const next = [...prev];
+      const job = next[index];
+      if (!job) return prev;
+      const display = normalizeDecimalDisplay(job.quantityInput ?? job.quantity_m);
+      const numeric = display === '' || display === '0.' ? 0 : Number(display);
+      const fixed = Number.isFinite(numeric) ? Number(numeric.toFixed(2)) : 0;
+      next[index] = {
+        ...job,
+        quantity_m: fixed,
+        quantityInput: fixed.toFixed(2),
+      };
+      return next;
+    });
+  };
+
+  const handleJobFieldChange = (index, field, rawValue) => {
+    setParsedJobs(prev => {
+      const next = [...prev];
+      const job = next[index];
+      if (!job) return prev;
+      let value = rawValue;
+      if (field === 'job_code') {
+        value = (rawValue ?? '').toString().toUpperCase();
+      }
+      if (field === 'job_type') {
+        value = (rawValue ?? '').toString();
+      }
+      if (field === 'job_date') {
+        value = rawValue ? sanitizeJobDate(rawValue) : '';
+      }
+      next[index] = {
+        ...job,
+        [field]: value,
+      };
+      return next;
+    });
+  };
+
+  const handleAddJob = () => {
+    setParsedJobs(prev => [...prev, {
+      client_name: '',
+      job_type: 'DTF Textil',
+      job_code: '',
+      job_date: '',
+      quantity_m: 0,
+      quantityInput: '0.00',
+      unit: 'm',
+      raw_line: '',
+      isManual: true,
+    }]);
+    setSelectedIndex(prev => {
+      const newIndex = (parsedJobs?.length ?? 0);
+      return newIndex;
+    });
+  };
+
+  const handleRemoveJob = (index) => {
+    setParsedJobs(prev => prev.filter((_, idx) => idx !== index));
+    setSelectedIndex(prev => {
+      if (prev == null) return prev;
+      if (prev === index) return null;
+      if (prev > index) return prev - 1;
+      return prev;
+    });
+  };
 
   const handleJobProcessed = (jobData) => {
     setProcessedJob(jobData);
-    const jobs = Array.isArray(jobData?.jobs) ? jobData.jobs : [];
+    const jobs = (Array.isArray(jobData?.jobs) ? jobData.jobs : []).map(job => {
+      const numeric = Number(job.quantity_m);
+      const fixed = Number.isFinite(numeric) ? Number(numeric.toFixed(2)) : 0;
+      return {
+        ...job,
+        job_date: sanitizeJobDate(job.job_date),
+        quantity_m: fixed,
+        quantityInput: fixed.toFixed(2),
+      };
+    });
     setParsedJobs(jobs);
     setSelectedIndex(jobs.length ? 0 : null);
     showNotification('Imagen procesada correctamente', 'success');
     // reset planned meters to sum of parsed
     const sum = jobs.reduce((s, j) => s + (Number(j.quantity_m) || 0), 0);
-    setPlannedMeters(sum);
+    const fixedSum = Number(sum.toFixed(2));
+    setPlannedMeters(fixedSum);
+    setPlannedMetersInput(fixedSum.toFixed(2));
+    setPlannedMetersTouched(false);
   };
 
   // Deprecated manual save flow (mantener placeholder por ahora)
@@ -106,6 +245,31 @@ const TrabajoOCR = () => {
     fetchNextSequence();
   }, [targetMachine, runDate]);
 
+  useEffect(() => {
+    if (plannedMetersTouched) return;
+    const sum = (parsedJobs || []).reduce((s, j) => s + (Number(j.quantity_m) || 0), 0);
+    const fixedSum = Number(sum.toFixed(2));
+    setPlannedMeters(fixedSum);
+    setPlannedMetersInput(fixedSum.toFixed(2));
+  }, [parsedJobs, plannedMetersTouched]);
+
+  const handlePlannedMetersChange = (rawValue) => {
+  const display = normalizeDecimalDisplay(rawValue);
+  if (!decimalPattern.test(display)) return;
+  const numeric = display === '' || display === '0.' ? 0 : Number(display);
+  setPlannedMeters(Number.isFinite(numeric) ? numeric : 0);
+  setPlannedMetersInput(display);
+    setPlannedMetersTouched(true);
+  };
+
+  const handlePlannedMetersBlur = () => {
+    setPlannedMeters(current => {
+      const fixed = ensureTwoDecimalsNumber(current);
+      setPlannedMetersInput(fixed.toFixed(2));
+      return fixed;
+    });
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -158,21 +322,99 @@ const TrabajoOCR = () => {
             {/* Jobs detectados a partir del OCR */}
             {parsedJobs.length > 0 && (
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-4">2. Jobs detectados ({parsedJobs.length})</h2>
-                <div className="space-y-2">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold text-gray-900">2. Jobs detectados ({parsedJobs.length})</h2>
+                  <button
+                    type="button"
+                    onClick={handleAddJob}
+                    className="px-3 py-1 text-sm rounded bg-gray-100 hover:bg-gray-200"
+                  >
+                    Agregar job manual
+                  </button>
+                </div>
+                <div className="space-y-3">
                   {parsedJobs.map((j, idx) => (
-                    <div key={idx} className={`p-3 border rounded flex items-center justify-between ${selectedIndex === idx ? 'border-blue-400 bg-blue-50' : 'border-gray-200'}`}>
-                      <div>
-                        <div className="text-sm font-medium">{j.client_name} — {j.quantity_m} m — {j.job_type}</div>
-                        <div className="text-xs text-gray-600">{j.job_code} · {j.job_date || 's/f'}</div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button className={`text-sm px-2 py-1 rounded ${selectedIndex === idx ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'}`} onClick={() => setSelectedIndex(idx)}>
-                          Seleccionar
-                        </button>
-                        <button className="text-sm px-2 py-1 rounded bg-gray-100" onClick={() => navigator.clipboard.writeText(`Cliente: ${j.client_name} | Tipo: ${j.job_type} | Cantidad: ${j.quantity_m} m | Código: ${j.job_code} | Fecha: ${j.job_date || ''}`)}>
-                          Copiar
-                        </button>
+                    <div key={idx} className={`p-3 border rounded ${selectedIndex === idx ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white'}`}>
+                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div className="flex-1">
+                          <div className="flex flex-wrap items-center gap-2 text-sm">
+                            <input
+                              type="text"
+                              value={j.client_name ?? ''}
+                              onChange={e => handleJobFieldChange(idx, 'client_name', e.target.value)}
+                              className="min-w-[160px] flex-1 border border-gray-300 rounded px-2 py-1"
+                              placeholder="Cliente"
+                            />
+                            <span className="text-gray-400">—</span>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={j.quantityInput ?? ensureTwoDecimalsString(j.quantity_m)}
+                                onChange={e => handleQuantityChange(idx, e.target.value)}
+                                onBlur={() => handleQuantityBlur(idx)}
+                                className="w-20 border border-gray-300 rounded px-2 py-1 text-sm"
+                                placeholder="0.00"
+                              />
+                              <span>m</span>
+                            </div>
+                            <span className="text-gray-400">—</span>
+                            <input
+                              type="text"
+                              value={j.job_type ?? ''}
+                              onChange={e => handleJobFieldChange(idx, 'job_type', e.target.value)}
+                              className="min-w-[140px] border border-gray-300 rounded px-2 py-1"
+                              placeholder="Tipo"
+                            />
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                            <label className="flex items-center gap-1">
+                              <span className="text-gray-500">Código</span>
+                              <input
+                                type="text"
+                                value={j.job_code ?? ''}
+                                onChange={e => handleJobFieldChange(idx, 'job_code', e.target.value)}
+                                className="border border-gray-300 rounded px-2 py-1 text-sm"
+                                placeholder="T171025"
+                              />
+                            </label>
+                            <label className="flex items-center gap-1">
+                              <span className="text-gray-500">Fecha</span>
+                              <input
+                                type="date"
+                                value={j.job_date || ''}
+                                onChange={e => handleJobFieldChange(idx, 'job_date', e.target.value)}
+                                className="border border-gray-300 rounded px-2 py-1 text-sm"
+                              />
+                            </label>
+                            {j.isManual && (
+                              <span className="px-2 py-0.5 rounded bg-yellow-100 text-yellow-700">Manual</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-2 items-stretch md:w-auto">
+                          <div className="flex gap-2 justify-end">
+                            <button
+                              className={`text-sm px-2 py-1 rounded ${selectedIndex === idx ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'}`}
+                              onClick={() => setSelectedIndex(idx)}
+                            >
+                              Seleccionar
+                            </button>
+                            <button
+                              className="text-sm px-2 py-1 rounded bg-gray-100"
+                              onClick={() => navigator.clipboard.writeText(`Cliente: ${j.client_name || ''} | Tipo: ${j.job_type || ''} | Cantidad: ${ensureTwoDecimalsString(j.quantity_m)} m | Código: ${j.job_code || ''} | Fecha: ${j.job_date || ''}`)}
+                            >
+                              Copiar
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            className="text-xs px-2 py-1 rounded bg-red-50 text-red-600 border border-red-200"
+                            onClick={() => handleRemoveJob(idx)}
+                          >
+                            Eliminar
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -210,8 +452,15 @@ const TrabajoOCR = () => {
                   </div>
                   <div className="flex items-center gap-2">
                     <label className="text-sm text-gray-600 w-24">Metros plan.</label>
-                    <input type="number" step="0.01" className="border rounded px-3 py-2 flex-1" value={plannedMeters} onChange={e => setPlannedMeters(Number(e.target.value) || 0)} />
-                    <span className="text-xs text-gray-500">(suma OCR: {totalMeters})</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="border rounded px-3 py-2 flex-1"
+                      value={plannedMetersInput}
+                      onChange={e => handlePlannedMetersChange(e.target.value)}
+                      onBlur={handlePlannedMetersBlur}
+                    />
+                    <span className="text-xs text-gray-500">(suma OCR: {totalMeters.toFixed(2)})</span>
                   </div>
                 </div>
                   <button
@@ -227,7 +476,7 @@ const TrabajoOCR = () => {
                           run_date: runDate,
                           sequence: seq,
                           name: runName || null,
-                          planned_meters: Number.isFinite(plannedMeters) ? plannedMeters : totalMeters,
+                          planned_meters: Number.isFinite(plannedMeters) ? ensureTwoDecimalsNumber(plannedMeters) : ensureTwoDecimalsNumber(totalMeters),
                           status: 'planned',
                         }];
                         const { data: runData, error: runErr } = await supabase
@@ -244,8 +493,8 @@ const TrabajoOCR = () => {
                           client_name: j.client_name,
                           job_code: j.job_code,
                           job_type: j.job_type,
-                          job_date: j.job_date || null,
-                          quantity_m: j.quantity_m,
+                          job_date: sanitizeJobDateOrNull(j.job_date),
+                          quantity_m: ensureTwoDecimalsNumber(j.quantity_m),
                           unit: 'm',
                           status: 'pending',
                           run_id: runId,
@@ -258,7 +507,8 @@ const TrabajoOCR = () => {
                         navigate('/operacion');
                       } catch (e) {
                         console.error(e);
-                        showNotification('Error enviando a cola de trabajo', 'error');
+                        const message = e?.message || e?.error_description;
+                        showNotification(message ? `Error enviando a cola de trabajo: ${message}` : 'Error enviando a cola de trabajo', 'error');
                       } finally {
                         setAssigning(false);
                       }

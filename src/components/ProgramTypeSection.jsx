@@ -79,13 +79,24 @@ export default function ProgramTypeSection({
   };
 
   // Función para formatear la fecha
-  const formatDate = (dateString) => {
-    if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString('es-MX', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+  const formatDate = (dateInput) => {
+    if (!dateInput) return '-';
+
+    const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    const value = dateInput instanceof Date ? dateInput : dateInput.toString().trim();
+
+    if (typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [year, month, day] = value.split('-').map(Number);
+      const localDate = new Date(year, month - 1, day);
+      return `${localDate.getDate()} ${meses[localDate.getMonth()]} ${localDate.getFullYear()}`;
+    }
+
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return `${parsed.getDate()} ${meses[parsed.getMonth()]} ${parsed.getFullYear()}`;
+    }
+
+    return value.toString();
   };
 
   // Función para calcular el porcentaje de progreso
@@ -109,9 +120,16 @@ export default function ProgramTypeSection({
             <div className="flex items-center gap-2 mb-2">
               {getStatusIcon(program)}
               <div className="flex items-center gap-2">
-                <span className="font-medium text-gray-900">
-                  Programa #{program.program_number}
-                  {isMain && <span className="ml-1 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">Principal</span>}
+                <span className="font-medium text-gray-900 flex items-center gap-2">
+                  <span>
+                    Programa #{program.program_number}
+                    {isMain && <span className="ml-1 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">Principal</span>}
+                  </span>
+                  {program.program_folio && (
+                    <span className="text-xs font-semibold uppercase tracking-wide bg-gray-900/10 text-gray-700 px-2 py-1 rounded-full">
+                      Folio {program.program_folio}
+                    </span>
+                  )}
                 </span>
                 <span className="text-xs text-gray-500 capitalize">{program.status}</span>
               </div>

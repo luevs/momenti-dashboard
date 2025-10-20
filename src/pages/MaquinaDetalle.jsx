@@ -52,10 +52,14 @@ export default function MaquinaDetalle() {
   // --- HANDLERS PARA MODALES DE EDITAR Y ELIMINAR ---
 
   const openEditModal = (supply) => {
-  setEditingSupply({ ...supply });
-  setEditReason("");
-  setEditAuthorizedBy("");
-  setEditModalOpen(true);
+    setEditingSupply({
+      ...supply,
+      consumption_ratio: String(supply.consumption_ratio ?? 1),
+      auto_track: Boolean(supply.auto_track),
+    });
+    setEditReason("");
+    setEditAuthorizedBy("");
+    setEditModalOpen(true);
   };
 
   const closeEditModal = () => {
@@ -87,6 +91,8 @@ export default function MaquinaDetalle() {
   const [initialStock, setInitialStock] = useState("");
   const [minimumLevel, setMinimumLevel] = useState("");
   const [criticalLevel, setCriticalLevel] = useState("");
+  const [consumptionRatio, setConsumptionRatio] = useState("1");
+  const [autoTrackConsumption, setAutoTrackConsumption] = useState(true);
 
   // Nuevo estado para editar registros de producción
   const [editRecordModalOpen, setEditRecordModalOpen] = useState(false);
@@ -340,6 +346,7 @@ export default function MaquinaDetalle() {
       const quantityBefore = parseFloat(selectedSupply.current_stock);
       const quantityAfter = parseFloat(newStock);
       const quantityChanged = quantityAfter - quantityBefore;
+      const recordedAtIso = new Date().toISOString();
 
       // Registrar el movimiento en el historial
       const { error: historyError } = await supabase
@@ -357,7 +364,8 @@ export default function MaquinaDetalle() {
             unit_cost: unitCost ? parseFloat(unitCost) : null,
             supplier: supplierName || null,
             notes: notes || null,
-            recorded_by: recordedBy.trim()
+            recorded_by: recordedBy.trim(),
+            recorded_at: recordedAtIso,
           }
         ]);
 
@@ -366,7 +374,7 @@ export default function MaquinaDetalle() {
       // Actualizar el stock actual
       const updateData = {
         current_stock: quantityAfter,
-        last_updated: new Date().toISOString(),
+        last_updated: recordedAtIso,
         updated_by: recordedBy.trim()
       };
 
@@ -423,13 +431,21 @@ export default function MaquinaDetalle() {
       alert("No hay máquinas disponibles para configurar.");
       return;
     }
-    setSelectedMachine(machines[0]);
-    updateAvailableSupplyTypes(machines[0]);
+    const target = machines.find(m => m.id?.toString() === id?.toString()) || machines[0];
+    setSelectedMachine(target);
+    updateAvailableSupplyTypes(target);
+    setConsumptionRatio("1");
+    setAutoTrackConsumption(true);
     setConfigModalOpen(true);
   };
 
   // Actualizar tipos de insumos disponibles según la máquina
   const updateAvailableSupplyTypes = (machine) => {
+    if (!machine) {
+      setAvailableSupplyTypes([]);
+      setSelectedSupplyType("");
+      return;
+    }
     const machineType = machine.type;
     const alreadyConfigured = machineSupplies
       .filter(ms => ms.machine_id === machine.id)
@@ -459,6 +475,8 @@ export default function MaquinaDetalle() {
     setInitialStock("");
     setMinimumLevel("");
     setCriticalLevel("");
+    setConsumptionRatio("1");
+    setAutoTrackConsumption(true);
   };
 
   // Agregar insumo a máquina
@@ -468,12 +486,18 @@ export default function MaquinaDetalle() {
       return;
     }
 
+    if (!consumptionRatio || parseFloat(consumptionRatio) <= 0) {
+      alert("Define el ratio de consumo (unidades por metro impreso).");
+      return;
+    }
+
     if (parseFloat(criticalLevel) >= parseFloat(minimumLevel)) {
       alert("El nivel crítico debe ser menor que el nivel mínimo.");
       return;
     }
 
     try {
+      const nowIso = new Date().toISOString();
       const { error } = await supabase
         .from('machine_supplies')
         .insert([
@@ -483,7 +507,10 @@ export default function MaquinaDetalle() {
             current_stock: parseFloat(initialStock),
             minimum_level: parseFloat(minimumLevel),
             critical_level: parseFloat(criticalLevel),
-            updated_by: currentUser?.name || currentUser?.email || "Admin"
+            consumption_ratio: parseFloat(consumptionRatio),
+            auto_track: autoTrackConsumption,
+            updated_by: currentUser?.name || currentUser?.email || "Admin",
+            last_updated: nowIso,
           }
         ]);
 
@@ -501,7 +528,8 @@ export default function MaquinaDetalle() {
             quantity_after: parseFloat(initialStock),
             quantity_changed: parseFloat(initialStock),
             notes: 'Configuración inicial del insumo',
-            recorded_by: currentUser?.name || currentUser?.email || 'Admin'
+            recorded_by: currentUser?.name || currentUser?.email || 'Admin',
+            recorded_at: nowIso,
           }
         ]);
 
@@ -515,6 +543,8 @@ export default function MaquinaDetalle() {
       setInitialStock("");
       setMinimumLevel("");
       setCriticalLevel("");
+      setConsumptionRatio("1");
+      setAutoTrackConsumption(true);
       
     } catch (error) {
       console.error('Error al agregar insumo:', error);
@@ -1137,6 +1167,24 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
                 className="border rounded px-3 py-2 w-full"
                 min="0"
               />
+              <label className="block text-gray-700 font-bold">Ratio de consumo (metros por metro impreso) *</label>
+              <input
+                type="number"
+                value={consumptionRatio}
+                onChange={e => setConsumptionRatio(e.target.value)}
+                className="border rounded px-3 py-2 w-full"
+                min="0"
+                step="0.01"
+              />
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={autoTrackConsumption}
+                  onChange={e => setAutoTrackConsumption(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                Activar descuento automático al registrar cortes
+              </label>
               <button
                 onClick={handleAddSupplyToMachine}
                 className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
@@ -1176,6 +1224,24 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
                 onChange={e => setEditingSupply({ ...editingSupply, critical_level: e.target.value })}
                 className="border rounded px-3 py-2 w-full"
               />
+              <label className="block text-gray-700 font-bold">Ratio de consumo *</label>
+              <input
+                type="number"
+                value={editingSupply.consumption_ratio}
+                onChange={e => setEditingSupply({ ...editingSupply, consumption_ratio: e.target.value })}
+                className="border rounded px-3 py-2 w-full"
+                min="0"
+                step="0.01"
+              />
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={Boolean(editingSupply.auto_track)}
+                  onChange={e => setEditingSupply({ ...editingSupply, auto_track: e.target.checked })}
+                  className="h-4 w-4"
+                />
+                Activar descuento automático al registrar cortes
+              </label>
               <label className="block text-gray-700 font-bold mb-2">Razón de edición *</label>
               <input
                 type="text"
@@ -1196,11 +1262,18 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
                     alert("Completa la razón y quién autoriza.");
                     return;
                   }
+                  const ratioValue = parseFloat(editingSupply.consumption_ratio);
+                  if (!ratioValue || ratioValue <= 0) {
+                    alert("Define un ratio de consumo válido.");
+                    return;
+                  }
                   const { error } = await supabase
                     .from('machine_supplies')
                     .update({
                       minimum_level: parseFloat(editingSupply.minimum_level),
                       critical_level: parseFloat(editingSupply.critical_level),
+                      consumption_ratio: ratioValue,
+                      auto_track: Boolean(editingSupply.auto_track),
                       edit_reason: editReason,
                       edit_authorized_by: editAuthorizedBy
                     })

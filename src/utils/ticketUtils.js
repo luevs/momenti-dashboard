@@ -43,6 +43,7 @@ export const generateTicketHTML = (ticketData, signatureDataURL, logoUrl = '/mom
   const remainingAfterOrder = client.remainingMeters;
   const previousMeters = (client.remainingMeters || 0) + (order.metersConsumed || 0);
   const programStatus = getProgramStatus(remainingAfterOrder, client.totalMeters);
+  const programFolio = order.programFolio || client.programFolio || '—';
 
   // Fallbacks seguros
   const registeredBy = order.registeredBy || '—';
@@ -111,6 +112,7 @@ export const generateTicketHTML = (ticketData, signatureDataURL, logoUrl = '/mom
           <!-- Información básica -->
           <div style="margin-bottom: 6px; font-size: 13px;">
             <div><strong>Folio:</strong> ${order.folio || '—'}</div>
+            <div><strong>Folio programa:</strong> ${programFolio}</div>
             <div><strong>Fecha:</strong> ${currentDateTime}</div>
             <div><strong>Cliente:</strong> ${client.name}</div>
             <div><strong>Tel cliente:</strong> ${clientePhone}</div>

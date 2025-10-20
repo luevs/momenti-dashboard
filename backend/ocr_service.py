@@ -563,6 +563,8 @@ class OCRService:
             s = re.sub(r'[ \t]+', ' ', s)
             # unir fecha ddmmaa si vino con espacios: U10 10 25-... -> U101025-...
             s = re.sub(r'([A-Z])(\d{2})\s*(\d{2})\s*(\d{2})', r'\1\2\3\4', s)
+            # corregir prefijos mal leídos tipo 11/1025-, 1171025-, I71025-
+            s = re.sub(r'([1I][1/7]?)(\d{6}-)', r'T\2', s)
             return s
 
         def _prettify_name(name_raw: str) -> str:
@@ -586,10 +588,33 @@ class OCRService:
             'T': 'DTF Textil',
         }
 
+        fallback_prefix = next(iter(JOB_TYPE_MAP)) if JOB_TYPE_MAP else 'T'
+
+        def _clean_leading_noise(line: str) -> str:
+            cleaned = re.sub(r'^[^A-Z0-9]+', '', line)
+
+            if '-' in cleaned:
+                token, rest = cleaned.split('-', 1)
+                token_norm = token.replace('/', '7').replace('\\', '7')
+                token_norm = token_norm.replace('|', '1').replace('I', '1')
+                token_norm = token_norm.replace('O', '0')
+                digits_only = re.sub(r'[^0-9]', '', token_norm)
+                if len(digits_only) >= 6:
+                    date_digits = digits_only[-6:]
+                    return f"{fallback_prefix}{date_digits}-{rest}"
+
+            match_digit_letter = re.match(r'^(\d)([A-Z]\d{6}-.+)$', cleaned)
+            if match_digit_letter:
+                return match_digit_letter.group(2)
+            match_digit_only = re.match(r'^(\d)(\d{6}-.+)$', cleaned)
+            if match_digit_only:
+                return f"{fallback_prefix}{match_digit_only.group(2)}"
+            return cleaned
+
         # Regex por línea: anclada; ignora lo que siga después de la M (fecha/hora de Windows)
         # Prefijo 1 letra (tipo), 6 dígitos fecha, guión, nombre en mayúsculas/guiones bajos, guión, cantidad decimal + 'M'
         JOB_LINE_RE = re.compile(
-            r"^\s*(?P<prefix>[A-Z])(?P<date>\d{6})-(?P<client>[A-ZÁÉÍÓÚÜÑ_]+)-(?P<qty>(?:\d+[\.,]\d+|\d+|[\.,]\d+))\s*M\b.*$",
+            r"^\s*(?P<prefix>[A-Z])(?P<date>\d{6})-(?P<client>[A-ZÁÉÍÓÚÜÑ_ ]+)-(?P<tail>.+)$",
             re.MULTILINE
         )
 
@@ -599,23 +624,30 @@ class OCRService:
             line_stripped = line.strip()
             if not line_stripped or len(line_stripped) < 8:
                 continue
-            m = JOB_LINE_RE.match(line_stripped.upper())
+            prepared = _clean_leading_noise(line_stripped.upper())
+            m = JOB_LINE_RE.match(prepared)
             if not m:
                 continue
             gd = m.groupdict()
             prefix = gd.get('prefix') or ''
             date_str = gd.get('date') or ''
             client_raw = gd.get('client') or ''
-            qty_raw = gd.get('qty') or ''
+            tail = gd.get('tail') or ''
+
+            if prefix.isdigit():
+                prefix = fallback_prefix
 
             # cantidad en metros (float)
             qty_val = None
+            qty_raw = None
             try:
-                # Permitir cantidades tipo .35 -> 0.35
-                q = qty_raw.replace(',', '.')
-                if q.startswith('.'):
-                    q = '0' + q
-                qty_val = float(q)
+                qty_match = re.search(r'([0-9]+[\.,][0-9]+|[0-9]+|[\.,][0-9]+)', tail)
+                if qty_match:
+                    qty_raw = qty_match.group(1)
+                    q = qty_raw.replace(',', '.')
+                    if q.startswith('.'):
+                        q = '0' + q
+                    qty_val = float(q)
             except Exception:
                 qty_val = None
 

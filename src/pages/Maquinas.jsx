@@ -3,6 +3,7 @@ import MaquinaCard from '../components/MaquinaCard';
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 import useCurrentUser from '../utils/useCurrentUser';
+import { autoConsumeAfterProduction } from "../utils/autoConsume";
 import { useNavigate } from "react-router-dom";
 import MaquinaDetalle from "./MaquinaDetalle"; 
 
@@ -197,19 +198,54 @@ export default function Maquinas() {
       meters_printed: Number(metrosHoy),
       registered_by: (currentUser && (currentUser.name || currentUser.username || currentUser.email)) || 'Sistema'
     };
-    const { error } = await supabase
+    let previousMeters = 0;
+    try {
+      const { data: existing } = await supabase
+        .from('machine_daily_prints')
+        .select('id, meters_printed')
+        .eq('machine_id', payload.machine_id)
+        .eq('date', payload.date)
+        .maybeSingle();
+      if (existing) {
+        previousMeters = Number(existing.meters_printed) || 0;
+      }
+    } catch (fetchError) {
+      console.warn('No se pudo obtener registro previo', fetchError);
+    }
+
+    const { data: upserted, error } = await supabase
       .from('machine_daily_prints')
-      .upsert([payload], { onConflict: ['machine_id', 'date'] }); // upsert evita duplicados por machine+date
+      .upsert([payload], { onConflict: ['machine_id', 'date'] })
+      .select();
     if (error) {
       alert("Error al registrar: " + error.message);
-    } else {
-      // actualizar UI localmente
-      setLatestRecords(prev => ({ ...prev, [impresoraSeleccionada.id]: payload }));
-      alert("Registro guardado");
-      setRegistroModalOpen(false);
-      setMetrosHoy("");
-      setImpresoraSeleccionada(null);
+      return;
     }
+
+    const record = Array.isArray(upserted) ? upserted[0] : null;
+    const deltaMeters = payload.meters_printed - previousMeters;
+
+    if (record && deltaMeters !== 0) {
+      try {
+        await autoConsumeAfterProduction({
+          machineId: record.machine_id,
+          meters: deltaMeters,
+          operator: record.registered_by,
+          productionRecordId: record.id,
+          productionDate: record.date,
+        });
+      } catch (consumeError) {
+        console.error('Error descontando insumos', consumeError);
+        alert('Registro guardado, pero no se pudo descontar el insumo automáticamente: ' + (consumeError.message || consumeError));
+      }
+    }
+
+    // actualizar UI localmente
+    setLatestRecords(prev => ({ ...prev, [impresoraSeleccionada.id]: { ...payload } }));
+    alert("Registro guardado");
+    setRegistroModalOpen(false);
+    setMetrosHoy("");
+    setImpresoraSeleccionada(null);
   };
 
   // Nuevo: Guardar corte diario para todas las máquinas
@@ -226,10 +262,28 @@ export default function Maquinas() {
       alert("Ingresa al menos un valor válido de metros.");
       return;
     }
-    const { error } = await supabase.from('machine_daily_prints').insert(registros);
+    const { data: inserted, error } = await supabase
+      .from('machine_daily_prints')
+      .insert(registros)
+      .select();
     if (error) {
       alert("Error al registrar: " + error.message);
     } else {
+      if (Array.isArray(inserted)) {
+        for (const record of inserted) {
+          try {
+            await autoConsumeAfterProduction({
+              machineId: record.machine_id,
+              meters: record.meters_printed,
+              operator: record.registered_by,
+              productionRecordId: record.id,
+              productionDate: record.date,
+            });
+          } catch (consumeError) {
+            console.error('Error descontando insumos', consumeError);
+          }
+        }
+      }
       alert("Corte diario guardado");
       setCorteModalOpen(false);
       setCorteMetros({});

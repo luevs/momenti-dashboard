@@ -1,6 +1,19 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText, Package, AlertTriangle } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import { autoConsumeAfterProduction } from "../utils/autoConsume";
+
+const pad2 = (value) => value.toString().padStart(2, "0");
+const toLocalDateInputValue = (date = new Date()) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+const toLocalTimeInputValue = (date = new Date()) => `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+const combineLocalDateTime = (dateStr, timeStr) => {
+  if (!dateStr) return new Date().toISOString();
+  const [year, month, day] = dateStr.split("-").map(Number);
+  if (!year || !month || !day) return new Date().toISOString();
+  const [hours, minutes] = (timeStr || "08:00").split(":").map(Number);
+  const localDate = new Date(year, (month ?? 1) - 1, day, hours ?? 0, minutes ?? 0, 0, 0);
+  return localDate.toISOString();
+};
 
 export default function Insumos() {
   const [activeTab, setActiveTab] = useState("DTF 1 (Left)");
@@ -22,6 +35,8 @@ export default function Insumos() {
   const [unitCost, setUnitCost] = useState("");
   const [notes, setNotes] = useState("");
   const [recordedBy, setRecordedBy] = useState("Sistema");
+  const [restockDate, setRestockDate] = useState(() => toLocalDateInputValue());
+  const [restockTime, setRestockTime] = useState(() => toLocalTimeInputValue());
   const [editReason, setEditReason] = useState("");
   const [editAuthorizedBy, setEditAuthorizedBy] = useState("");
   const [deleteReason, setDeleteReason] = useState("");
@@ -37,10 +52,14 @@ export default function Insumos() {
   // --- HANDLERS PARA MODALES DE EDITAR Y ELIMINAR ---
 
   const openEditModal = (supply) => {
-  setEditingSupply({ ...supply });
-  setEditReason("");
-  setEditAuthorizedBy("");
-  setEditModalOpen(true);
+    setEditingSupply({
+      ...supply,
+      consumption_ratio: String(supply.consumption_ratio ?? 1),
+      auto_track: Boolean(supply.auto_track),
+    });
+    setEditReason("");
+    setEditAuthorizedBy("");
+    setEditModalOpen(true);
   };
 
   const closeEditModal = () => {
@@ -72,6 +91,10 @@ export default function Insumos() {
   const [initialStock, setInitialStock] = useState("");
   const [minimumLevel, setMinimumLevel] = useState("");
   const [criticalLevel, setCriticalLevel] = useState("");
+  const [consumptionRatio, setConsumptionRatio] = useState("1");
+  const [autoTrackConsumption, setAutoTrackConsumption] = useState(true);
+  const [configRecordedDate, setConfigRecordedDate] = useState(() => toLocalDateInputValue());
+  const [configRecordedTime, setConfigRecordedTime] = useState(() => toLocalTimeInputValue());
 
   // Cargar datos iniciales
   useEffect(() => {
@@ -125,6 +148,47 @@ export default function Insumos() {
     }
   };
 
+  const calcularTotalMes = useCallback(
+    async (machineIdOverride, dateOverride) => {
+      const targetMachineId = machineIdOverride ?? machines.find((m) => m.name === activeTab)?.id;
+      if (!targetMachineId) {
+        setCorteTotalMes(0);
+        return;
+      }
+
+      let referenceDate = dateOverride
+        ? new Date(dateOverride)
+        : corteFecha
+          ? new Date(corteFecha)
+          : new Date();
+
+      if (Number.isNaN(referenceDate.valueOf())) {
+        referenceDate = new Date();
+      }
+
+      const inicioMes = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1);
+      const finMes = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0);
+
+      const inicioStr = inicioMes.toISOString().slice(0, 10);
+      const finStr = finMes.toISOString().slice(0, 10);
+
+      const { data, error } = await supabase
+        .from('production_records')
+        .select('meters_produced')
+        .eq('machine_id', targetMachineId)
+        .gte('date', inicioStr)
+        .lte('date', finStr);
+
+      if (!error && Array.isArray(data)) {
+        const total = data.reduce((sum, rec) => sum + Number(rec.meters_produced || 0), 0);
+        setCorteTotalMes(total);
+      } else {
+        setCorteTotalMes(0);
+      }
+    },
+    [machines, activeTab, corteFecha, setCorteTotalMes],
+  );
+
   // Obtener insumos de la máquina activa
   const getCurrentMachineSupplies = () => {
     return machineSupplies.filter(supply => 
@@ -177,6 +241,8 @@ export default function Insumos() {
     setUnitCost("");
     setNotes("");
     setRecordedBy("Sistema");
+    setRestockDate(toLocalDateInputValue());
+    setRestockTime(toLocalTimeInputValue());
   };
 
   // Cerrar modal de reposición
@@ -189,6 +255,8 @@ export default function Insumos() {
     setSupplierName("");
     setUnitCost("");
     setNotes("");
+    setRestockDate(toLocalDateInputValue());
+    setRestockTime(toLocalTimeInputValue());
   };
 
   const closeHistoryModal = () => {
@@ -209,10 +277,16 @@ export default function Insumos() {
       return;
     }
 
+    if (!restockDate) {
+      alert("Selecciona la fecha de registro del movimiento.");
+      return;
+    }
+
     try {
       const quantityBefore = parseFloat(selectedSupply.current_stock);
       const quantityAfter = parseFloat(newStock);
       const quantityChanged = quantityAfter - quantityBefore;
+      const recordedAtIso = combineLocalDateTime(restockDate, restockTime);
 
       // Registrar el movimiento en el historial
       const { error: historyError } = await supabase
@@ -230,7 +304,8 @@ export default function Insumos() {
             unit_cost: unitCost ? parseFloat(unitCost) : null,
             supplier: supplierName || null,
             notes: notes || null,
-            recorded_by: recordedBy.trim()
+            recorded_by: recordedBy.trim(),
+            recorded_at: recordedAtIso,
           }
         ]);
 
@@ -239,7 +314,7 @@ export default function Insumos() {
       // Actualizar el stock actual
       const updateData = {
         current_stock: quantityAfter,
-        last_updated: new Date().toISOString(),
+        last_updated: recordedAtIso,
         updated_by: recordedBy.trim()
       };
 
@@ -298,6 +373,10 @@ export default function Insumos() {
     }
     setSelectedMachine(machines[0]);
     updateAvailableSupplyTypes(machines[0]);
+    setConsumptionRatio("1");
+    setAutoTrackConsumption(true);
+    setConfigRecordedDate(toLocalDateInputValue());
+    setConfigRecordedTime(toLocalTimeInputValue());
     setConfigModalOpen(true);
   };
 
@@ -332,6 +411,10 @@ export default function Insumos() {
     setInitialStock("");
     setMinimumLevel("");
     setCriticalLevel("");
+    setConsumptionRatio("1");
+    setAutoTrackConsumption(true);
+    setConfigRecordedDate(toLocalDateInputValue());
+    setConfigRecordedTime(toLocalTimeInputValue());
   };
 
   // Agregar insumo a máquina
@@ -341,12 +424,23 @@ export default function Insumos() {
       return;
     }
 
+    if (!consumptionRatio || parseFloat(consumptionRatio) <= 0) {
+      alert("Define el ratio de consumo (unidades por metro impreso).");
+      return;
+    }
+
     if (parseFloat(criticalLevel) >= parseFloat(minimumLevel)) {
       alert("El nivel crítico debe ser menor que el nivel mínimo.");
       return;
     }
 
+    if (!configRecordedDate) {
+      alert("Selecciona la fecha del primer movimiento de este insumo.");
+      return;
+    }
+
     try {
+      const recordedAtIso = combineLocalDateTime(configRecordedDate, configRecordedTime);
       const { error } = await supabase
         .from('machine_supplies')
         .insert([
@@ -356,7 +450,10 @@ export default function Insumos() {
             current_stock: parseFloat(initialStock),
             minimum_level: parseFloat(minimumLevel),
             critical_level: parseFloat(criticalLevel),
-            updated_by: "Admin"
+            consumption_ratio: parseFloat(consumptionRatio),
+            auto_track: autoTrackConsumption,
+            updated_by: "Admin",
+            last_updated: recordedAtIso,
           }
         ]);
 
@@ -374,7 +471,8 @@ export default function Insumos() {
             quantity_after: parseFloat(initialStock),
             quantity_changed: parseFloat(initialStock),
             notes: 'Configuración inicial del insumo',
-            recorded_by: 'Admin'
+            recorded_by: 'Admin',
+            recorded_at: recordedAtIso,
           }
         ]);
 
@@ -388,6 +486,10 @@ export default function Insumos() {
       setInitialStock("");
       setMinimumLevel("");
       setCriticalLevel("");
+      setConsumptionRatio("1");
+      setAutoTrackConsumption(true);
+      setConfigRecordedDate(toLocalDateInputValue());
+      setConfigRecordedTime(toLocalTimeInputValue());
       
     } catch (error) {
       console.error('Error al agregar insumo:', error);
@@ -444,11 +546,17 @@ export default function Insumos() {
           <button
             onClick={() => {
               setCorteModalOpen(true);
-              setCorteFecha(new Date().toISOString().slice(0,10));
+              const defaultDate = new Date().toISOString().slice(0, 10);
+              setCorteFecha(defaultDate);
               setCorteMetros("");
               setCorteOperador("");
               setCorteError("");
-              calcularTotalMes();
+              const activeMachine = machines.find((m) => m.name === activeTab);
+              if (activeMachine) {
+                calcularTotalMes(activeMachine.id, defaultDate);
+              } else {
+                setCorteTotalMes(0);
+              }
             }}
             className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition"
           >
@@ -521,6 +629,9 @@ export default function Insumos() {
                 const status = getSupplyStatus(supply.current_stock, supply.critical_level, supply.minimum_level);
                 const percentage = supply.current_stock > 0 ? 
                   ((supply.current_stock / (supply.minimum_level * 4)) * 100).toFixed(0) : 0; // Asumiendo que el 100% es 4x el nivel mínimo
+                const ratio = supply.consumption_ratio ? parseFloat(supply.consumption_ratio) || 1 : 1;
+                const autoTrack = Boolean(supply.auto_track);
+                const lastUpdatedLabel = supply.last_updated ? formatDate(supply.last_updated) : 'Sin registro';
                 
                 return (
                   <div key={supply.id} className="border rounded-lg p-4 hover:shadow-md transition">
@@ -539,6 +650,11 @@ export default function Insumos() {
                       <p>Mínimo: {supply.minimum_level} {supply.supply_types.unit}</p>
                       <p>Crítico: {supply.critical_level} {supply.supply_types.unit}</p>
                       {supply.supplier && <p>Proveedor: {supply.supplier}</p>}
+                      <p>
+                        Consumo teórico: {ratio.toFixed(2)} {supply.supply_types.unit} / m
+                        {autoTrack ? <span className="ml-2 inline-flex items-center text-green-600 text-xs">(auto)</span> : null}
+                      </p>
+                      <p>Último movimiento: {lastUpdatedLabel}</p>
                     </div>
 
                     {/* Barra de progreso */}
@@ -640,6 +756,27 @@ export default function Insumos() {
                   <option value="Operador 2">Operador 2</option>
                   <option value="Operador 3">Operador 3</option>
                 </select>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-gray-700 font-bold mb-2">Fecha de registro *</label>
+                  <input
+                    type="date"
+                    value={restockDate}
+                    onChange={(e) => setRestockDate(e.target.value)}
+                    className="border rounded px-3 py-2 w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-700 font-bold mb-2">Hora</label>
+                  <input
+                    type="time"
+                    value={restockTime}
+                    onChange={(e) => setRestockTime(e.target.value)}
+                    className="border rounded px-3 py-2 w-full"
+                  />
+                </div>
               </div>
 
               <div>
@@ -859,6 +996,41 @@ export default function Insumos() {
                 className="border rounded px-3 py-2 w-full"
                 min="0"
               />
+              <label className="block text-gray-700 font-bold">Consumo teórico *</label>
+              <input
+                type="number"
+                value={consumptionRatio}
+                onChange={e => setConsumptionRatio(e.target.value)}
+                className="border rounded px-3 py-2 w-full"
+                min="0"
+                step="0.01"
+              />
+              <span className="text-xs text-gray-500">Unidades del insumo por cada metro impreso (ej. film: 1.00).</span>
+              <label className="block text-gray-700 font-bold">Fecha inicial del movimiento *</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input
+                  type="date"
+                  value={configRecordedDate}
+                  onChange={e => setConfigRecordedDate(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                />
+                <input
+                  type="time"
+                  value={configRecordedTime}
+                  onChange={e => setConfigRecordedTime(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                />
+              </div>
+              <span className="text-xs text-gray-500">Esta fecha se mostrará en la tarjeta del insumo y quedará registrada en el historial.</span>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700 mt-2">
+                <input
+                  type="checkbox"
+                  checked={autoTrackConsumption}
+                  onChange={e => setAutoTrackConsumption(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                Habilitar descuento automático según metros impresos
+              </label>
               <button
                 onClick={handleAddSupplyToMachine}
                 className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
@@ -898,6 +1070,24 @@ export default function Insumos() {
                 onChange={e => setEditingSupply({ ...editingSupply, critical_level: e.target.value })}
                 className="border rounded px-3 py-2 w-full"
               />
+              <label className="block text-gray-700 font-bold">Consumo teórico *</label>
+              <input
+                type="number"
+                value={editingSupply.consumption_ratio}
+                onChange={e => setEditingSupply({ ...editingSupply, consumption_ratio: e.target.value })}
+                className="border rounded px-3 py-2 w-full"
+                min="0"
+                step="0.01"
+              />
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={Boolean(editingSupply.auto_track)}
+                  onChange={e => setEditingSupply({ ...editingSupply, auto_track: e.target.checked })}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                Habilitar descuento automático
+              </label>
               <label className="block text-gray-700 font-bold mb-2">Razón de edición *</label>
               <input
                 type="text"
@@ -918,11 +1108,17 @@ export default function Insumos() {
                     alert("Completa la razón y quién autoriza.");
                     return;
                   }
+                  if (!editingSupply.consumption_ratio || parseFloat(editingSupply.consumption_ratio) <= 0) {
+                    alert("Define un consumo teórico válido (mayor que cero).");
+                    return;
+                  }
                   const { error } = await supabase
                     .from('machine_supplies')
                     .update({
                       minimum_level: parseFloat(editingSupply.minimum_level),
                       critical_level: parseFloat(editingSupply.critical_level),
+                      consumption_ratio: parseFloat(editingSupply.consumption_ratio || 0) || 0,
+                      auto_track: Boolean(editingSupply.auto_track),
                       edit_reason: editReason,
                       edit_authorized_by: editAuthorizedBy
                     })
@@ -1092,24 +1288,58 @@ export default function Insumos() {
                     setCorteError("Ya existe un corte para esta máquina y fecha.");
                     return;
                   }
+                  const metrosValue = parseFloat(corteMetros);
                   // Inserta el corte
-                  const { error } = await supabase
+                  const { data: corteRegistrado, error } = await supabase
                     .from('production_records')
                     .insert([{
                       machine_id: maquina.id,
                       date: corteFecha,
-                      meters_produced: parseFloat(corteMetros),
+                      meters_produced: metrosValue,
                       recorded_by: corteOperador
-                    }]);
+                    }])
+                    .select()
+                    .single();
                   if (error) {
                     setCorteError("Error al guardar el corte: " + error.message);
+                    return;
+                  }
+
+                  let consumoResumen = [];
+                  let autoConsumptionFailed = false;
+                  try {
+                    consumoResumen = await autoConsumeAfterProduction({
+                      machineId: maquina.id,
+                      meters: metrosValue,
+                      operator: corteOperador,
+                      productionRecordId: corteRegistrado?.id,
+                      productionDate: corteFecha,
+                    });
+                  } catch (autoError) {
+                    console.error("Error al descontar insumos automáticamente", autoError);
+                    autoConsumptionFailed = true;
+                  }
+                  await fetchMachineSupplies();
+
+                  setCorteModalOpen(false);
+                  setCorteMetros("");
+                  setCorteOperador("");
+                  setCorteError("");
+                  await calcularTotalMes(maquina.id, corteFecha);
+
+                  const resumenTexto = consumoResumen.length
+                    ? `\n\nConsumo registrado:\n${consumoResumen
+                        .map((item) => {
+                          const unitText = item.unit ? ` ${item.unit}` : "";
+                          return `- ${item.name}: -${item.amount.toFixed(2)}${unitText}`;
+                        })
+                        .join("\n")}`
+                    : "";
+
+                  if (autoConsumptionFailed) {
+                    alert(`Corte guardado, pero revisa el stock: no se pudo descontar automáticamente.`);
                   } else {
-                    setCorteModalOpen(false);
-                    setCorteMetros("");
-                    setCorteOperador("");
-                    setCorteError("");
-                    calcularTotalMes();
-                    alert("¡Corte diario registrado correctamente!");
+                    alert(`¡Corte diario registrado correctamente!${resumenTexto}`);
                   }
                 }}
               >
@@ -1123,27 +1353,3 @@ export default function Insumos() {
     </div>
   );
 }
-
-const calcularTotalMes = async () => {
-  // Suma metros del mes actual para la máquina activa
-  const inicioMes = new Date();
-  inicioMes.setDate(1);
-  inicioMes.setHours(0,0,0,0);
-  const finMes = new Date();
-  finMes.setMonth(finMes.getMonth() + 1, 0);
-  finMes.setHours(23,59,59,999);
-
-  const { data, error } = await supabase
-    .from('production_records')
-    .select('meters_produced')
-    .eq('machine_id', machines.find(m => m.name === activeTab)?.id)
-    .gte('date', inicioMes.toISOString().slice(0,10))
-    .lte('date', finMes.toISOString().slice(0,10));
-
-  if (!error && data) {
-    const total = data.reduce((sum, rec) => sum + parseFloat(rec.meters_produced), 0);
-    setCorteTotalMes(total);
-  } else {
-    setCorteTotalMes(0);
-  }
-};

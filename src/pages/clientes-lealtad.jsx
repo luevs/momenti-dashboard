@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText } from "lucide-react";
+import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText, SlidersHorizontal, LayoutGrid, Table2, Users, Sparkles, Ruler, Search } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import useCurrentUser from '../utils/useCurrentUser';
 import { generateTicketHTML } from '../utils/ticketUtils';
@@ -8,6 +8,7 @@ import { saveAs } from "file-saver";
 import SignatureCanvas from "react-signature-canvas";
 import LoyaltyTicket from "../components/LoyaltyTicket";
 import CustomerLoyaltyCard from '../components/CustomerLoyaltyCard';
+import CustomerLoyaltyTable from '../components/CustomerLoyaltyTable';
 
 // Colores para el estado
 const estadoColores = {
@@ -24,51 +25,70 @@ const getClientStatus = (remainingMeters, totalMeters) => {
   return 'activo';
 };
 
-// Función para formatear fecha - Parsea manualmente para evitar problemas de zona horaria
-const formatDate = (dateString) => {
-  if (!dateString) return 'Fecha no disponible';
-  
+// Formato de fecha tolerante a distintos formatos y sin desfasar fechas tipo YYYY-MM-DD
+const formatDate = (dateInput, options = {}) => {
+  const { useUTC = false } = options;
+  if (!dateInput) return 'Fecha no disponible';
+
   const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-  
-  // Convertir a string para manejar diferentes formatos
-  const dateStr = dateString.toString();
-  
-  // Para timestamps como "2025-10-03T10:38:00" o "2025-10-03 10:38:00"
-  if (dateStr.includes('T') || (dateStr.includes('-') && dateStr.includes(':'))) {
-    // Extraer partes manualmente
-    let datePart, timePart;
-    
-    if (dateStr.includes('T')) {
-      [datePart, timePart] = dateStr.split('T');
-      timePart = timePart.split('.')[0]; // Remover milisegundos si los hay
-    } else {
-      [datePart, timePart] = dateStr.split(' ');
-    }
-    
-    const [year, month, day] = datePart.split('-');
-    const [hour, minute] = timePart.split(':');
-    
-    const monthName = meses[parseInt(month) - 1];
-    const hourInt = parseInt(hour);
-    const ampm = hourInt >= 12 ? 'p.m.' : 'a.m.';
-    const hour12 = hourInt === 0 ? 12 : hourInt > 12 ? hourInt - 12 : hourInt;
-    
-    return `${parseInt(day)} ${monthName} ${year}, ${hour12}:${minute} ${ampm}`;
+  const value = dateInput instanceof Date ? dateInput : dateInput.toString().trim();
+
+  // Caso YYYY-MM-DD (Supabase DATE) ⇒ crear fecha en zona local para evitar desface
+  const isoDateOnlyMatch = typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}$/);
+  if (isoDateOnlyMatch) {
+    const [year, month, day] = value.split('-').map(Number);
+    const localDate = new Date(year, month - 1, day);
+    return `${localDate.getDate()} ${meses[localDate.getMonth()]} ${localDate.getFullYear()}`;
   }
-  
-  // Para fechas simples dd-mm-yyyy o dd/mm/yyyy
-  if (dateStr.includes('-') || dateStr.includes('/')) {
-    const separator = dateStr.includes('-') ? '-' : '/';
-    const parts = dateStr.split(separator);
-    
+
+  // ISO con tiempo (ej. 2025-10-03T10:38:00Z) o similar
+  const isoDateTimeMatch = typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/);
+  if (isoDateTimeMatch) {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      const day = useUTC ? date.getUTCDate() : date.getDate();
+      const monthName = useUTC ? meses[date.getUTCMonth()] : meses[date.getMonth()];
+      const year = useUTC ? date.getUTCFullYear() : date.getFullYear();
+      const hoursRaw = useUTC ? date.getUTCHours() : date.getHours();
+      const minutes = (useUTC ? date.getUTCMinutes() : date.getMinutes()).toString().padStart(2, '0');
+      const hours = hoursRaw;
+      const ampm = hours >= 12 ? 'p.m.' : 'a.m.';
+      const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+      return `${day} ${monthName} ${year}, ${hour12}:${minutes} ${ampm}`;
+    }
+  }
+
+  // Intento estándar con Date
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    const day = useUTC ? parsed.getUTCDate() : parsed.getDate();
+    const monthName = useUTC ? meses[parsed.getUTCMonth()] : meses[parsed.getMonth()];
+    const year = useUTC ? parsed.getUTCFullYear() : parsed.getFullYear();
+    return `${day} ${monthName} ${year}`;
+  }
+
+  // dd-mm-yyyy o dd/mm/yyyy
+  if (typeof value === 'string' && (value.includes('-') || value.includes('/'))) {
+    const separator = value.includes('-') ? '-' : '/';
+    const parts = value.split(separator);
     if (parts.length === 3) {
-      const [day, month, year] = parts;
-      const monthName = meses[parseInt(month) - 1];
-      return `${parseInt(day)} ${monthName} ${year}`;
+      const cleanParts = parts.map(str => str.replace(/\D/g, ''));
+      if (cleanParts[0].length === 4) {
+        const [year, month, day] = cleanParts.map(Number);
+        if (year && month) {
+          const localDate = new Date(year, month - 1, day || 1);
+          return `${localDate.getDate()} ${meses[localDate.getMonth()]} ${localDate.getFullYear()}`;
+        }
+      } else {
+        const [day, month, year] = cleanParts.map(Number);
+        if (year && month) {
+          return `${day} ${meses[month - 1]} ${year}`;
+        }
+      }
     }
   }
-  
-  return 'Fecha inválida';
+
+  return value.toString();
 };
 
 // Usar hook centralizado para obtener el usuario actual
@@ -113,6 +133,7 @@ export default function ClientesLealtad() {
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [clientHistory, setClientHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historyTypeFilter, setHistoryTypeFilter] = useState(null);
   
   // Estados para el modal de pedido mejorado
   const [observaciones, setObservaciones] = useState("");
@@ -140,6 +161,9 @@ export default function ClientesLealtad() {
   const [autorizacionCliente, setAutorizacionCliente] = useState(false);
 
   const [selectedType, setSelectedType] = useState('Todos');
+  const [viewMode, setViewMode] = useState('cards');
+  const [showFilters, setShowFilters] = useState(false);
+  const filtersRef = React.useRef(null);
 
   // Estados para el modal de registro por programa (faltaban, restaurados)
   const [registerMetersModalOpen, setRegisterMetersModalOpen] = useState(false);
@@ -287,6 +311,8 @@ export default function ClientesLealtad() {
   client_name: selectedCustomerForMeters.razon_social || selectedCustomerForMeters.name,
         program_id: selectedProgramId,
         program_number: selectedProgram.program_number,
+  program_folio: selectedProgram.program_folio || null,
+        remaining_meters: newRemainingMeters,
         type: selectedTypeForMeters,
         meters_consumed: Number(metersUsed.toFixed ? metersUsed.toFixed(2) : metersUsed),
         unit: 'metros',
@@ -318,7 +344,9 @@ export default function ClientesLealtad() {
             observaciones: orderRecord.observaciones,
             signature: orderRecord.signature,
             customer_id: orderRecord.customer_id,
-            program_id: orderRecord.program_id
+            program_id: orderRecord.program_id,
+            program_folio: orderRecord.program_folio,
+            remaining_meters: orderRecord.remaining_meters
           };
 
           const { data: histData, error: histError } = await supabase
@@ -340,7 +368,8 @@ export default function ClientesLealtad() {
       }
 
       // 3) Preparar datos para modal Post-Pedido
-  const generatedFolio = Math.floor(Math.random() * 9000) + 1000;
+      const generatedFolio = Math.floor(Math.random() * 9000) + 1000;
+      const programFolio = selectedProgram.program_folio || String(generatedFolio);
       const ticketInfo = {
         client: {
           id: selectedCustomerForMeters.id,
@@ -349,10 +378,12 @@ export default function ClientesLealtad() {
           totalMeters: selectedProgram.total_meters,
           remainingMeters: newRemainingMeters,
           celular: selectedCustomerForMeters.celular || '', // ✅ Agregar celular del cliente
-          loyaltyProgramPhone: selectedProgram.numero_wpp || selectedCustomerForMeters.celular || '' // ✅ Usar loyaltyProgramPhone
+          loyaltyProgramPhone: selectedProgram.numero_wpp || selectedCustomerForMeters.celular || '', // ✅ Usar loyaltyProgramPhone
+          programFolio
         },
         order: {
           folio: generatedFolio,
+          programFolio,
           metersConsumed: metersUsed,
           recordedAt: new Date(new Date().getTime() - (6 * 60 * 60 * 1000)).toISOString(),
           recordedBy: selectedRegisteredBy,
@@ -364,7 +395,8 @@ export default function ClientesLealtad() {
         customerName: ticketInfo.client.name,
         metros: Number(metersUsed.toFixed ? metersUsed.toFixed(2) : metersUsed),
         type: selectedTypeForMeters,
-        registeredBy: ticketInfo.order.recordedBy || 'Sistema'
+        registeredBy: ticketInfo.order.recordedBy || 'Sistema',
+        programFolio
       });
 
       setTicketData(ticketInfo);
@@ -414,6 +446,7 @@ export default function ClientesLealtad() {
     const fecha = pedido.recordedAt ? new Date(pedido.recordedAt).toLocaleDateString('es-MX') : new Date().toLocaleDateString('es-MX');
     const metros = pedido.metersConsumed || 0;
     const restantes = ticketData.client?.remainingMeters ?? '';
+  const programFolio = pedido.programFolio || cliente.programFolio || '';
 
     console.log('📊 WhatsApp Message Data:', {
       cliente,
@@ -439,7 +472,10 @@ export default function ClientesLealtad() {
       return;
     }
 
-    const message = `Saludos ${cliente.name}\nLe informamos que su pedido de ${tipo} ya está listo para que pase por el.\nEl día ${fecha} consumiste ${metros} metros de tu programa de lealtad ${tipo}. Te quedan ${restantes} metros en tu plan. ¡Gracias por tu preferencia!`;
+  const metrosTxt = typeof metros === 'number' ? metros.toFixed(2) : metros;
+  const restantesTxt = typeof restantes === 'number' ? restantes.toFixed(2) : restantes;
+  const folioLine = programFolio ? `\nFolio del programa: ${programFolio}` : '';
+  const message = `Saludos ${cliente.name}\nLe informamos que su pedido de ${tipo} ya está listo para que pase por el.${folioLine}\nEl día ${fecha} consumiste ${metrosTxt} metros de tu programa de lealtad ${tipo}. Te quedan ${restantesTxt} metros en tu plan. ¡Gracias por tu preferencia!`;
     const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank');
   };
@@ -460,8 +496,10 @@ export default function ClientesLealtad() {
       const fecha = program?.purchase_date ? new Date(program.purchase_date).toLocaleDateString('es-MX') : new Date().toLocaleDateString('es-MX');
       const metrosConsumidos = Number(((program?.total_meters || 0) - (program?.remaining_meters || 0)).toFixed(2));
       const metrosRestantes = Number((program?.remaining_meters || 0).toFixed(2));
+  const programFolio = program?.program_folio || '';
 
-      const message = `Saludos ${nombre}\nLe informamos que su pedido de ${tipo} ya está listo para que pase por el.\nEl día ${fecha} consumiste ${metrosConsumidos} metros de tu programa de lealtad ${tipo}. Te quedan ${metrosRestantes} metros en tu plan. ¡Gracias por tu preferencia!`;
+  const folioLine = programFolio ? `\nFolio del programa: ${programFolio}` : '';
+  const message = `Saludos ${nombre}\nLe informamos que su pedido de ${tipo} ya está listo para que pase por el.${folioLine}\nEl día ${fecha} consumiste ${metrosConsumidos.toFixed(2)} metros de tu programa de lealtad ${tipo}. Te quedan ${metrosRestantes.toFixed(2)} metros en tu plan. ¡Gracias por tu preferencia!`;
       const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
       window.open(url, '_blank');
     };
@@ -478,14 +516,16 @@ export default function ClientesLealtad() {
           totalMeters: program?.total_meters || customer?.totalMeters || 0,
           remainingMeters: program?.remaining_meters || customer?.remainingMeters || 0,
           celular: customer?.celular || '',
-          numeroWpp: customer?.celular || program?.numero_wpp || customer?.numeroWpp || ''
+          numeroWpp: customer?.celular || program?.numero_wpp || customer?.numeroWpp || '',
+          programFolio: program?.program_folio || ''
         },
         order: {
           metersConsumed: Number(((program?.total_meters || 0) - (program?.remaining_meters || 0)).toFixed(2)),
           registeredBy: getCurrentUser(),
           observaciones: `Resumen del programa #${program?.program_number || ''}`,
           recordedAt: new Date().toISOString(),
-          folio: Math.floor(Math.random() * 9999) + 1000
+          folio: Math.floor(Math.random() * 9999) + 1000,
+          programFolio: program?.program_folio || ''
         }
       };
 
@@ -524,7 +564,7 @@ export default function ClientesLealtad() {
         .select(`
           id, razon_social, alias, celular, email, direccion,
           loyalty_programs (
-            id, type, program_number, total_meters, remaining_meters,
+            id, type, program_number, program_folio, total_meters, remaining_meters,
             status, purchase_date, completion_date, numero_wpp,
             edit_reason, edit_authorized_by, created_at
           )
@@ -626,9 +666,33 @@ export default function ClientesLealtad() {
       .reduce((sum, p) => sum + (p.remaining_meters || 0), 0);
   };
 
+  const parseMeters = (value) => {
+    if (value === null || value === undefined) return null;
+    const numeric = typeof value === 'string' ? parseFloat(value) : Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  };
+
+  const roundMeters = (value) => {
+    if (!Number.isFinite(value)) return value;
+    return Math.round(value * 100) / 100;
+  };
+
   useEffect(() => {
     fetchCustomersWithPrograms();
   }, []);
+
+  useEffect(() => {
+    if (!showFilters) return;
+
+    const handleClickOutside = (event) => {
+      if (filtersRef.current && !filtersRef.current.contains(event.target)) {
+        setShowFilters(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showFilters]);
 
   const abrirModal = (cliente) => {
     setSelectedClient(cliente);
@@ -698,6 +762,7 @@ export default function ClientesLealtad() {
     console.log('openHistoryModal called with client:', cliente);
     setSelectedClient(cliente);
     setHistoryModalOpen(true);
+    setHistoryTypeFilter(null);
     getClientHistory(cliente.id);
   };
 
@@ -706,6 +771,7 @@ export default function ClientesLealtad() {
     console.log('openProgramHistory called with client, program:', { cliente, program });
     setSelectedClient(cliente);
     setHistoryModalOpen(true);
+    setHistoryTypeFilter(program?.type || null);
     const programId = program?.id || program?.program_number || null;
     getClientHistory(cliente.id, programId);
   };
@@ -715,6 +781,7 @@ export default function ClientesLealtad() {
     setHistoryModalOpen(false);
     setSelectedClient(null);
     setClientHistory([]);
+    setHistoryTypeFilter(null);
   };
 
   // Función mejorada para registrar pedido con historial
@@ -1006,6 +1073,47 @@ export default function ClientesLealtad() {
         }
       }
 
+      // Obtener programas existentes del cliente para calcular número consecutivo
+      const { data: existingProgramsAll, error: existingProgramsError } = await supabase
+        .from('loyalty_programs')
+        .select('program_number, type')
+        .eq('customer_id', selectedCustomerId);
+
+      if (existingProgramsError) {
+        console.error('Error al consultar programas existentes:', existingProgramsError);
+        alert('No se pudo calcular el número del programa. Intenta de nuevo.');
+        return;
+      }
+
+      const programsSameType = (existingProgramsAll || []).filter(program => (program.type || '').toLowerCase() === type.toLowerCase());
+      const nextProgramNumber = programsSameType.reduce((max, program) => {
+        const num = parseInt(program.program_number, 10);
+        return Number.isFinite(num) && num > max ? num : max;
+      }, 0) + 1;
+
+      // Calcular folio global consecutivo de 3 dígitos
+      let nextProgramFolio = '001';
+      const { data: maxFolioData, error: maxFolioError } = await supabase
+        .from('loyalty_programs')
+        .select('program_folio')
+        .not('program_folio', 'is', null)
+        .order('program_folio', { ascending: false })
+        .limit(1);
+
+      if (maxFolioError) {
+        console.error('Error al calcular folio:', maxFolioError);
+        alert('No se pudo calcular el folio del programa. Intenta de nuevo.');
+        return;
+      }
+
+      if (maxFolioData && maxFolioData.length > 0) {
+        const currentFolioNum = parseInt(maxFolioData[0].program_folio, 10);
+        if (Number.isFinite(currentFolioNum)) {
+          const incremented = currentFolioNum + 1;
+          nextProgramFolio = String(Math.max(incremented, 1)).padStart(3, '0');
+        }
+      }
+
       // 2. Crear programa de lealtad usando la nueva estructura loyalty_programs
       const { error: programError } = await supabase
         .from('loyalty_programs')
@@ -1017,7 +1125,8 @@ export default function ClientesLealtad() {
           status: 'activo',
           purchase_date: lastPurchase,
           numero_wpp: newWhatsApp,
-          program_number: 1, // Se puede mejorar para contar programas existentes
+          program_number: nextProgramNumber,
+          program_folio: nextProgramFolio,
           completion_date: null
         }]);
 
@@ -1235,21 +1344,84 @@ export default function ClientesLealtad() {
     }
   };
 
-  // Calcular estadísticas del historial
-  const calculateHistoryStats = (history) => {
-    if (!history.length) return { total: 0, promedio: 0, ultimoMes: 0 };
-    
-    const total = history.reduce((sum, record) => sum + record.meters_consumed, 0);
-    const promedio = total / history.length;
-    
-    const unMesAtras = new Date();
-    unMesAtras.setMonth(unMesAtras.getMonth() - 1);
-    
-    const ultimoMes = history
-      .filter(record => new Date(record.recorded_at) >= unMesAtras)
-      .reduce((sum, record) => sum + record.meters_consumed, 0);
-    
-    return { total, promedio: promedio.toFixed(2), ultimoMes };
+  // Calcular estadísticas del historial enfocadas en folios activos e históricos
+  const calculateHistoryStats = (history = [], client = null, typeFilter = null) => {
+    const stats = {
+      activeCount: 0,
+      activeBreakdown: '—',
+      totalActiveRemaining: 0,
+      totalActiveMeters: 0,
+      consumedActive: 0,
+      completedCount: 0,
+      lastCompletedDate: null,
+      totalTrackedFolios: 0
+    };
+
+    const normalizedType = typeFilter ? typeFilter.toLowerCase() : null;
+
+    const typeMatches = (programType) => {
+      if (!normalizedType) return true;
+      return (programType || '').toLowerCase() === normalizedType;
+    };
+
+    if (client?.programs) {
+      const activePrograms = [];
+      const historicalPrograms = [];
+
+      Object.values(client.programs).forEach(({ active = [], historical = [] }) => {
+        const filteredActive = active.filter(program => typeMatches(program.type));
+        const filteredHistorical = historical.filter(program => typeMatches(program.type));
+        activePrograms.push(...filteredActive);
+        historicalPrograms.push(...filteredHistorical);
+      });
+
+      stats.activeCount = activePrograms.length;
+
+      if (activePrograms.length) {
+        const breakdown = {};
+
+        activePrograms.forEach(program => {
+          const remaining = parseFloat(program.remaining_meters) || 0;
+          const total = parseFloat(program.total_meters) || 0;
+          stats.totalActiveRemaining += remaining;
+          stats.totalActiveMeters += total;
+          const typeLabel = program.type || 'General';
+          breakdown[typeLabel] = (breakdown[typeLabel] || 0) + 1;
+        });
+
+        stats.consumedActive = Math.max(stats.totalActiveMeters - stats.totalActiveRemaining, 0);
+        stats.activeBreakdown = Object.entries(breakdown)
+          .map(([type, count]) => `${type}: ${count}`)
+          .join(' • ');
+      }
+
+      const completedPrograms = [
+        ...historicalPrograms.filter(program => (program.status || '').toLowerCase() === 'completado'),
+        ...activePrograms.filter(program => (program.status || '').toLowerCase() === 'completado')
+      ];
+
+      stats.completedCount = completedPrograms.length;
+
+      if (completedPrograms.length) {
+        const lastCompleted = completedPrograms
+          .map(program => program.completion_date || program.updated_at || program.created_at)
+          .filter(Boolean)
+          .sort((a, b) => new Date(b) - new Date(a))[0];
+        stats.lastCompletedDate = lastCompleted || null;
+      }
+    }
+
+    if (history.length) {
+      const folios = new Set();
+      history.forEach(record => {
+        if (typeMatches(record.type) && record.program_folio) {
+          folios.add(record.program_folio);
+        }
+      });
+      stats.totalTrackedFolios = folios.size;
+    }
+
+    return stats;
   };
   
   // Función de filtrado unificada para clientes
@@ -1300,6 +1472,86 @@ export default function ClientesLealtad() {
 
     return filtered;
   }, [customersWithPrograms, searchQuery, selectedType, showExpiringClients]);
+
+  const loyaltyStats = useMemo(() => {
+    const aggregates = {
+      dtfClients: 0,
+      uvClients: 0,
+      totalPrograms: 0,
+      totalMeters: 0,
+      totalCustomers: customersWithPrograms.length || 0
+    };
+
+    customersWithPrograms.forEach(customer => {
+      const programsByType = customer.programs || {};
+      const dtfPrograms = programsByType['DTF Textil'];
+      const uvPrograms = programsByType['UV DTF'];
+
+      const hasDTF = Boolean(dtfPrograms && ((dtfPrograms.active?.length || 0) + (dtfPrograms.historical?.length || 0)));
+      const hasUV = Boolean(uvPrograms && ((uvPrograms.active?.length || 0) + (uvPrograms.historical?.length || 0)));
+
+      if (hasDTF) aggregates.dtfClients += 1;
+      if (hasUV) aggregates.uvClients += 1;
+
+      Object.values(programsByType).forEach(typePrograms => {
+        const active = typePrograms?.active || [];
+        const historical = typePrograms?.historical || [];
+
+        aggregates.totalPrograms += active.length + historical.length;
+
+        [...active, ...historical].forEach(program => {
+          aggregates.totalMeters += Number(program?.total_meters) || 0;
+        });
+      });
+    });
+
+    return aggregates;
+  }, [customersWithPrograms]);
+
+  const summaryCards = useMemo(() => ([
+    {
+      id: 'dtf',
+      label: 'Clientes DTF Textil',
+      value: loyaltyStats.dtfClients,
+      iconBg: 'bg-blue-500/10 text-blue-600',
+      border: 'border-blue-100',
+      icon: <Users size={22} />,
+      suffix: ''
+    },
+    {
+      id: 'uv',
+      label: 'Clientes UV DTF',
+      value: loyaltyStats.uvClients,
+      iconBg: 'bg-purple-500/10 text-purple-600',
+      border: 'border-purple-100',
+      icon: <Sparkles size={22} />,
+      suffix: ''
+    },
+    {
+      id: 'programs',
+      label: 'Programas vendidos',
+      value: loyaltyStats.totalPrograms,
+      iconBg: 'bg-green-500/10 text-green-600',
+      border: 'border-green-100',
+      icon: <User size={22} />,
+      suffix: ''
+    },
+    {
+      id: 'meters',
+      label: 'Metros vendidos',
+      value: Math.round(loyaltyStats.totalMeters),
+      iconBg: 'bg-amber-500/10 text-amber-600',
+      border: 'border-amber-100',
+      icon: <Ruler size={22} />,
+      suffix: 'm'
+    }
+  ]), [loyaltyStats]);
+
+  const handleFilterSelect = (type) => {
+    setSelectedType(type);
+    setShowExpiringClients(false);
+    setShowFilters(false);
+  };
 
   const fetchGlobalHistory = async () => {
     setIsLoadingGlobalHistory(true);
@@ -1390,6 +1642,7 @@ export default function ClientesLealtad() {
     let loyaltyProgramPhone = '';
     let currentRemainingMeters = 0;
     let totalProgramMeters = 0;
+  let activeProgramFolio = record.program_folio || '';
     
     // Buscar en los programas del cliente el que corresponda al tipo del record
     if (selectedClient?.programs && record.type) {
@@ -1400,6 +1653,7 @@ export default function ClientesLealtad() {
         loyaltyProgramPhone = program.numero_wpp || '';
         currentRemainingMeters = Number(program.remaining_meters ?? 0); // ✅ Obtener metros restantes actuales
         totalProgramMeters = Number(program.total_meters ?? 0); // ✅ Obtener metros totales del programa
+        activeProgramFolio = program.program_folio || activeProgramFolio;
       }
     }
     
@@ -1428,14 +1682,16 @@ export default function ClientesLealtad() {
         totalMeters: totalProgramMeters || 0,
         remainingMeters: currentRemainingMeters, // ✅ Usar metros restantes del programa de lealtad
         celular: selectedClient?.celular || '', // ✅ Agregar celular del cliente actual
-        loyaltyProgramPhone: loyaltyProgramPhone // ✅ Usar el número del programa de lealtad
+        loyaltyProgramPhone: loyaltyProgramPhone, // ✅ Usar el número del programa de lealtad
+        programFolio: activeProgramFolio || record.program_folio || ''
       },
       order: {
         metersConsumed: metersConsumedNum,
         registeredBy: record.recorded_by || 'Sistema',
         observaciones: record.observaciones || '',
         recordedAt: record.recorded_at || new Date().toISOString(),
-        folio: record.folio || Math.floor(Math.random() * 9999) + 1000
+        folio: record.folio || Math.floor(Math.random() * 9999) + 1000,
+        programFolio: activeProgramFolio || record.program_folio || ''
       }
     };
 
@@ -1447,7 +1703,8 @@ export default function ClientesLealtad() {
       customerName: ticketInfo.client.name,
       metros: metersConsumedNum, // ✅ Usar 'metros' no 'metersConsumed'
       type: ticketInfo.client.type,
-      registeredBy: record.recorded_by || 'Sistema'
+      registeredBy: record.recorded_by || 'Sistema',
+      programFolio: activeProgramFolio || record.program_folio || ''
     });
     
     // Cerrar modal de historial y abrir post-pedido
@@ -1479,102 +1736,127 @@ export default function ClientesLealtad() {
         </div>
       </div>
       
-      {/* SCORECARDS */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="bg-blue-50 p-4 rounded-lg text-center">
-          <p className="text-2xl font-bold text-blue-600">
-            {customersWithPrograms.filter(c => c.programs && c.programs["DTF Textil"] && 
-              (c.programs["DTF Textil"].active?.length > 0 || c.programs["DTF Textil"].historical?.length > 0)).length}
-          </p>
-          <p className="text-sm text-gray-600">Clientes DTF Textil</p>
-        </div>
-        <div className="bg-purple-50 p-4 rounded-lg text-center">
-          <p className="text-2xl font-bold text-purple-600">
-            {customersWithPrograms.filter(c => c.programs && c.programs["UV DTF"] && 
-              (c.programs["UV DTF"].active?.length > 0 || c.programs["UV DTF"].historical?.length > 0)).length}
-          </p>
-          <p className="text-sm text-gray-600">Clientes UV DTF</p>
-        </div>
-        <div className="bg-green-50 p-4 rounded-lg text-center">
-          <p className="text-2xl font-bold text-green-600">
-            {customersWithPrograms.reduce((total, customer) => {
-              let customerPrograms = 0;
-              if (customer.programs) {
-                Object.values(customer.programs).forEach(typePrograms => {
-                  customerPrograms += (typePrograms.active?.length || 0) + (typePrograms.historical?.length || 0);
-                });
-              }
-              return total + customerPrograms;
-            }, 0)}
-          </p>
-          <p className="text-sm text-gray-600">Programas vendidos</p>
-        </div>
-        <div className="bg-yellow-50 p-4 rounded-lg text-center">
-          <p className="text-2xl font-bold text-yellow-600">
-            {customersWithPrograms.reduce((total, customer) => {
-              let customerMeters = 0;
-              if (customer.programs) {
-                Object.values(customer.programs).forEach(typePrograms => {
-                  if (typePrograms.active) {
-                    typePrograms.active.forEach(program => {
-                      customerMeters += parseFloat(program.total_meters || 0);
-                    });
-                  }
-                  if (typePrograms.historical) {
-                    typePrograms.historical.forEach(program => {
-                      customerMeters += parseFloat(program.total_meters || 0);
-                    });
-                  }
-                });
-              }
-              return total + customerMeters;
-            }, 0).toFixed(0)}
-          </p>
-          <p className="text-sm text-gray-600">Metros vendidos</p>
-        </div>
+      {/* Resumen de clientes y programas */}
+      <div className="grid gap-4 mb-6 sm:grid-cols-2 xl:grid-cols-4">
+        {summaryCards.map(card => {
+          const formattedValue = typeof card.value === 'number'
+            ? card.value.toLocaleString('es-MX')
+            : card.value;
+
+          return (
+            <div
+              key={card.id}
+              className={`relative overflow-hidden rounded-2xl border ${card.border} bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-lg`}
+            >
+              <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-gradient-to-br from-white/60 to-transparent" aria-hidden="true"></div>
+              <div className="flex items-center justify-between">
+                <div className={`flex h-11 w-11 items-center justify-center rounded-full ${card.iconBg}`}>
+                  {card.icon}
+                </div>
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-400 text-right max-w-[130px]">
+                  {card.label}
+                </span>
+              </div>
+              <div className="mt-6 flex items-baseline gap-2">
+                <span className="text-3xl font-semibold text-gray-900">{formattedValue}{card.suffix}</span>
+              </div>
+              <p className="mt-2 text-sm text-gray-500">
+                {card.id === 'meters'
+                  ? 'Metros contratados acumulados'
+                  : card.id === 'programs'
+                    ? 'Programas activos e históricos registrados'
+                    : 'Clientes con al menos un programa vigente o histórico'}
+              </p>
+            </div>
+          );
+        })}
       </div>
 
       {/* Filtros y búsqueda */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-6">
-        {/* Barra de búsqueda */}
-        <div className="flex-1">
-          <input
-            type="text"
-            placeholder="Buscar cliente por nombre, ID, teléfono o email..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-        </div>
+      <div className="mb-6 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="relative flex-1">
+            <Search size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar cliente por nombre, ID, teléfono o email..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-4 text-sm shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
 
-        {/* Filtros por tipo */}
-        <div className="flex gap-2">
-          {['Todos', 'DTF Textil', 'UV DTF'].map(type => (
-            <button
-              key={type}
-              onClick={() => {
-                setSelectedType(type);
-                setShowExpiringClients(false); // Reset expiring filter when changing type
-              }}
-              className={`px-4 py-2 rounded-lg transition whitespace-nowrap ${
-                selectedType === type && !showExpiringClients
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              {type}
-            </button>
-          ))}
-          
-          {/* Botón A punto de expirar */}
-          <button
-            onClick={() => setShowExpiringClients(!showExpiringClients)}
-            className={`px-4 py-2 rounded-lg transition whitespace-nowrap ${
-              showExpiringClients ? "bg-yellow-500 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            {showExpiringClients ? "Todos los Clientes" : "A punto de expirar"}
-          </button>
+          <div className="flex items-center gap-3 justify-between md:justify-end">
+            <div ref={filtersRef} className="relative">
+              <button
+                onClick={() => setShowFilters(prev => !prev)}
+                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                  showFilters ? 'border-blue-600 bg-blue-50 text-blue-600' : 'border-gray-200 text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <SlidersHorizontal size={18} />
+                <span className="hidden sm:inline">Filtros</span>
+              </button>
+
+              {showFilters && (
+                <div className="absolute right-0 z-20 mt-2 w-56 rounded-lg border border-gray-200 bg-white shadow-lg">
+                  <div className="p-2 space-y-1">
+                    {['Todos', 'DTF Textil', 'UV DTF'].map(type => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => handleFilterSelect(type)}
+                        className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition ${
+                          selectedType === type && !showExpiringClients
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                    <div className="h-px bg-gray-100" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowExpiringClients(prev => !prev);
+                        setShowFilters(false);
+                      }}
+                      className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition ${
+                        showExpiringClients
+                          ? 'bg-yellow-500 text-white shadow-sm'
+                          : 'text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      A punto de expirar
+                      {showExpiringClients && <span className="text-xs font-semibold uppercase tracking-wide">Activo</span>}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+              <button
+                onClick={() => setViewMode('cards')}
+                className={`flex items-center gap-2 px-3 py-2 text-sm transition ${
+                  viewMode === 'cards' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <LayoutGrid size={18} />
+                <span className="hidden sm:inline">Tarjetas</span>
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                className={`flex items-center gap-2 px-3 py-2 text-sm transition ${
+                  viewMode === 'table' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <Table2 size={18} />
+                <span className="hidden sm:inline">Tabla</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1703,22 +1985,39 @@ export default function ClientesLealtad() {
             ) : (
               <>
                 {/* Estadísticas */}
-                <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
                   {(() => {
-                    const stats = calculateHistoryStats(clientHistory);
+                    const stats = calculateHistoryStats(clientHistory, selectedClient, historyTypeFilter);
+                    const formatMeters = (value) => `${(Number(value) || 0).toFixed(2)}m`;
+                    const lastCompletedLabel = stats.lastCompletedDate
+                      ? formatDate(stats.lastCompletedDate).split(',')[0]
+                      : null;
+                    const typeLabel = historyTypeFilter ? historyTypeFilter : 'Todos los programas';
+
                     return (
                       <>
                         <div className="bg-blue-50 p-4 rounded-lg text-center">
-                          <p className="text-2xl font-bold text-blue-600">{Number(stats.total).toFixed(2)}m</p>
-                          <p className="text-sm text-gray-600">Total consumido</p>
+                          <p className="text-2xl font-bold text-blue-600">{formatMeters(stats.consumedActive)}</p>
+                          <p className="text-sm text-gray-600">Metros consumidos</p>
+                          <p className="text-xs text-gray-500 mt-1">{stats.activeBreakdown || '—'}</p>
+                          <p className="text-xs text-gray-400 mt-1 uppercase tracking-wide">{typeLabel}</p>
                         </div>
                         <div className="bg-green-50 p-4 rounded-lg text-center">
-                          <p className="text-2xl font-bold text-green-600">{Number(stats.promedio).toFixed(2)}m</p>
-                          <p className="text-sm text-gray-600">Promedio por pedido</p>
+                          <p className="text-2xl font-bold text-green-600">{formatMeters(stats.totalActiveRemaining)}</p>
+                          <p className="text-sm text-gray-600">Saldo activo</p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            de {formatMeters(stats.totalActiveMeters)} contratados · consumido {formatMeters(stats.consumedActive)}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-1 uppercase tracking-wide">{typeLabel}</p>
                         </div>
                         <div className="bg-purple-50 p-4 rounded-lg text-center">
-                          <p className="text-2xl font-bold text-purple-600">{Number(stats.ultimoMes).toFixed(2)}m</p>
-                          <p className="text-sm text-gray-600">Último mes</p>
+                          <p className="text-2xl font-bold text-purple-600">{stats.completedCount}</p>
+                          <p className="text-sm text-gray-600">Folios completados</p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {lastCompletedLabel ? `Último: ${lastCompletedLabel}` : 'Sin registros recientes'}
+                            {stats.totalTrackedFolios ? ` · Historial: ${stats.totalTrackedFolios}` : ''}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-1 uppercase tracking-wide">{typeLabel}</p>
                         </div>
                       </>
                     );
@@ -1731,48 +2030,180 @@ export default function ClientesLealtad() {
                     if (!clientHistory || !clientHistory.length) return <p className="text-center text-gray-500 py-4">No hay registros para este cliente.</p>;
 
                     const grouped = clientHistory.reduce((acc, rec) => {
-                      const label = rec.program_number ? `Programa #${rec.program_number} (${rec.type || 'Sin tipo'})` : (rec.type || 'General');
-                      if (!acc[label]) acc[label] = [];
-                      acc[label].push(rec);
+                      const key = rec.program_folio || `${rec.program_id || 'sin-programa'}-${rec.program_number || rec.type || 'General'}`;
+                      if (!acc[key]) {
+                        acc[key] = {
+                          label: rec.program_number
+                            ? `Programa #${rec.program_number} (${rec.type || 'Sin tipo'})`
+                            : (rec.type || 'General'),
+                          folio: rec.program_folio || null,
+                          records: []
+                        };
+                      }
+                      acc[key].records.push(rec);
                       return acc;
                     }, {});
 
-                    return Object.entries(grouped).map(([groupLabel, records]) => (
-                      <div key={groupLabel} className="bg-white border border-gray-200 rounded-lg">
-                        <div className="px-4 py-3 border-b flex items-center justify-between">
-                          <div className="font-semibold">{groupLabel}</div>
-                          <div className="text-sm text-gray-500">{records.length} movimiento(s)</div>
-                        </div>
-                        <div className="divide-y">
-                          {records.map(record => (
-                            <div key={record.id} className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                              <div>
-                                <div className="flex items-center gap-2 mb-1">
-                                  <Clock className="text-gray-400" size={16} />
-                                  <span className="text-lg font-semibold text-blue-600">{Number(record.meters_consumed).toFixed(2)}m</span>
-                                  <span className="text-sm text-gray-500">- {formatDate(record.recorded_at)}</span>
-                                </div>
-                                <div className="text-sm text-gray-600">
-                                  Registrado por: {record.recorded_by || 'Sistema'}
-                                  {record.observaciones ? ` • ${record.observaciones}` : ''}
-                                </div>
-                              </div>
+                    return Object.entries(grouped).map(([groupKey, groupData]) => {
+                      const sortedRecords = [...(groupData.records || [])].sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+                      const ascendingRecords = [...sortedRecords].reverse();
 
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => openHistoryPostPedidoModal(record)}
-                                  className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1"
-                                  title="Abrir opciones de WhatsApp y ticket para este pedido"
-                                >
-                                  <FileText size={14} />
-                                  Acciones
-                                </button>
-                              </div>
+                      const programMeta = (() => {
+                        if (!selectedClient?.programs) return null;
+                        const sample = sortedRecords[0] || groupData.records?.[0];
+                        if (!sample || !sample.type) return null;
+                        const typePrograms = selectedClient.programs[sample.type] || { active: [], historical: [] };
+                        const combined = [...(typePrograms.active || []), ...(typePrograms.historical || [])];
+                        if (groupData.folio) {
+                          const byFolio = combined.find(p => p.program_folio === groupData.folio);
+                          if (byFolio) return byFolio;
+                        }
+                        if (sample.program_id) {
+                          const byId = combined.find(p => p.id === sample.program_id);
+                          if (byId) return byId;
+                        }
+                        if (sample.program_number) {
+                          const byNumber = combined.find(p => p.program_number === sample.program_number);
+                          if (byNumber) return byNumber;
+                        }
+                        return combined[0] || null;
+                      })();
+
+                      if (historyTypeFilter && groupData.records.every(rec => (rec.type || '').toLowerCase() !== historyTypeFilter.toLowerCase())) {
+                        return null;
+                      }
+
+                      const remainingById = new Map();
+                      const programTotal = programMeta ? parseMeters(programMeta.total_meters) : null;
+
+                      if (programTotal !== null) {
+                        let running = roundMeters(programTotal);
+                        ascendingRecords.forEach(record => {
+                          const consumed = parseMeters(record.meters_consumed) || 0;
+                          let computedRemaining = running !== null && Number.isFinite(running)
+                            ? roundMeters(running - consumed)
+                            : null;
+                          const snapshot = parseMeters(record.remaining_meters);
+                          let displayRemaining = computedRemaining;
+
+                          if (snapshot !== null && Number.isFinite(snapshot)) {
+                            const diff = computedRemaining !== null && Number.isFinite(computedRemaining)
+                              ? Math.abs(snapshot - computedRemaining)
+                              : null;
+
+                            if (diff !== null && diff <= 0.05) {
+                              displayRemaining = roundMeters(snapshot);
+                            } else if (computedRemaining === null || !Number.isFinite(computedRemaining)) {
+                              displayRemaining = roundMeters(snapshot);
+                            } else {
+                              displayRemaining = roundMeters(computedRemaining);
+                            }
+                          }
+
+                          if (displayRemaining === null || !Number.isFinite(displayRemaining)) {
+                            displayRemaining = 0;
+                          }
+
+                          displayRemaining = Math.max(displayRemaining, 0);
+                          remainingById.set(record.id, roundMeters(displayRemaining));
+                          running = displayRemaining;
+                        });
+                      } else {
+                        let running = parseMeters(sortedRecords[0]?.remaining_meters);
+                        if (running === null && programMeta) {
+                          running = parseMeters(programMeta.remaining_meters);
+                        }
+
+                        if (running !== null) {
+                          running = roundMeters(running);
+                          sortedRecords.forEach(record => {
+                            const stored = parseMeters(record.remaining_meters);
+                            const consumed = parseMeters(record.meters_consumed) || 0;
+
+                            if (stored !== null) {
+                              running = roundMeters(stored);
+                            }
+
+                            if (running !== null && Number.isFinite(running)) {
+                              remainingById.set(record.id, roundMeters(running));
+                              running = roundMeters(running + consumed);
+                            }
+                          });
+                        } else {
+                          sortedRecords.forEach(record => {
+                            const stored = parseMeters(record.remaining_meters);
+                            if (stored !== null) {
+                              remainingById.set(record.id, roundMeters(stored));
+                            }
+                          });
+                        }
+                      }
+
+                      const purchaseDateLabel = programMeta?.purchase_date
+                        ? formatDate(programMeta.purchase_date)
+                        : null;
+
+                      return (
+                        <div key={groupKey} className="bg-white border border-gray-200 rounded-lg">
+                          <div className="px-4 py-3 border-b flex items-center justify-between">
+                            <div className="font-semibold flex items-center gap-3 flex-wrap">
+                              <span>{groupData.label}</span>
+                              {groupData.folio && (
+                                <span className="text-xs font-mono bg-gray-900/10 text-gray-700 px-2 py-1 rounded-full uppercase tracking-wide">
+                                  Folio {groupData.folio}
+                                </span>
+                              )}
+                              {purchaseDateLabel && (
+                                <span className="text-xs text-gray-500 font-normal">
+                                  Compra: {purchaseDateLabel}
+                                </span>
+                              )}
                             </div>
-                          ))}
+                            <div className="text-sm text-gray-500">{sortedRecords.length} movimiento(s)</div>
+                          </div>
+                          <div className="divide-y">
+                            {sortedRecords.map(record => {
+                              const metersConsumed = parseMeters(record.meters_consumed) || 0;
+                              const displayRemaining = remainingById.has(record.id)
+                                ? remainingById.get(record.id)
+                                : parseMeters(record.remaining_meters);
+
+                              return (
+                                <div key={record.id} className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                  <div>
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <Clock className="text-gray-400" size={16} />
+                                      <span className="text-lg font-semibold text-blue-600">{metersConsumed.toFixed(2)}m</span>
+                                      <span className="text-sm text-gray-500">- {formatDate(record.recorded_at, { useUTC: true })}</span>
+                                    </div>
+                                    <div className="text-sm text-gray-600">
+                                      Registrado por: {record.recorded_by || 'Sistema'}
+                                      {record.observaciones ? ` • ${record.observaciones}` : ''}
+                                      {displayRemaining !== null && displayRemaining !== undefined && Number.isFinite(displayRemaining) && (
+                                        <span className="block text-xs text-gray-500 mt-1">
+                                          Saldo restante: {displayRemaining.toFixed(2)}m
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => openHistoryPostPedidoModal(record)}
+                                      className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1"
+                                      title="Abrir opciones de WhatsApp y ticket para este pedido"
+                                    >
+                                      <FileText size={14} />
+                                      Acciones
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ));
+                      );
+                    });
                   })()}
                 </div>
               </>
@@ -2151,6 +2582,14 @@ export default function ClientesLealtad() {
                 Agregar Primer Cliente
               </button>
             </div>
+          ) : viewMode === 'table' ? (
+            <CustomerLoyaltyTable
+              customers={filteredCustomers}
+              onAddProgram={openAddProgramModal}
+              onRegisterMeters={handleRegisterMeters}
+              onOpenHistory={openHistoryModal}
+              onOpenProgramHistory={openProgramHistory}
+            />
           ) : (
             <div className="space-y-4 pb-4">
               {filteredCustomers.map(customer => (
@@ -2161,11 +2600,11 @@ export default function ClientesLealtad() {
                   isExpanded={isExpanded(customer.id)}
                   onToggleExpand={() => toggleExpand(customer.id)}
                   onAddProgram={openAddProgramModal}
-            onEditProgram={handleEditProgram}
-            onRegisterMeters={handleRegisterMeters} // NUEVO
-            onProgramWhatsApp={handleProgramWhatsApp}
-            onProgramPrint={handleProgramPrintTicket}
-            onOpenProgramHistory={openProgramHistory}
+                  onEditProgram={handleEditProgram}
+                  onRegisterMeters={handleRegisterMeters}
+                  onProgramWhatsApp={handleProgramWhatsApp}
+                  onProgramPrint={handleProgramPrintTicket}
+                  onOpenProgramHistory={openProgramHistory}
                 />
               ))}
             </div>
@@ -2210,7 +2649,9 @@ export default function ClientesLealtad() {
                     <th className="px-4 py-2 text-left">Fecha</th>
                     <th className="px-4 py-2 text-left">Cliente</th>
                     <th className="px-4 py-2 text-left">Tipo</th>
+                    <th className="px-4 py-2 text-left">Folio</th>
                     <th className="px-4 py-2 text-left">Metros consumidos</th>
+                    <th className="px-4 py-2 text-left">Saldo restante</th>
                     <th className="px-4 py-2 text-left">Registrado por</th>
                     <th className="px-4 py-2 text-left">Observaciones</th>
                     <th className="px-4 py-2 text-left">Acciones</th>
@@ -2219,10 +2660,12 @@ export default function ClientesLealtad() {
                 <tbody>
                   {globalHistory.map((record) => (
                     <tr key={record.id} className="border-b">
-                      <td className="px-4 py-2">{formatDate(record.recorded_at)}</td>
+                      <td className="px-4 py-2">{formatDate(record.recorded_at, { useUTC: true })}</td>
                       <td className="px-4 py-2">{record.client_name}</td>
                       <td className="px-4 py-2">{record.type || ""}</td>
+                      <td className="px-4 py-2 font-mono text-xs">{record.program_folio || '—'}</td>
                       <td className="px-4 py-2">{record.meters_consumed}m</td>
+                      <td className="px-4 py-2">{record.remaining_meters !== null && record.remaining_meters !== undefined ? `${Number(record.remaining_meters).toFixed(2)}m` : '—'}</td>
                       <td className="px-4 py-2">{record.recorded_by}</td>
                       <td className="px-4 py-2">{record.observaciones || ""}</td>
                       <td className="px-4 py-2">
@@ -2257,6 +2700,11 @@ export default function ClientesLealtad() {
               <div className="text-sm text-blue-700">
                 {(ultimoPedidoGuardado?.metros || ticketData?.order?.metersConsumed || 0).toFixed(2)}m consumidos de <strong>{ultimoPedidoGuardado?.type || ticketData?.client?.type}</strong>
               </div>
+              {(ultimoPedidoGuardado?.programFolio || ticketData?.order?.programFolio || ticketData?.client?.programFolio) && (
+                <div className="text-xs font-semibold text-blue-800">
+                  Folio programa: {ultimoPedidoGuardado?.programFolio || ticketData?.order?.programFolio || ticketData?.client?.programFolio}
+                </div>
+              )}
               <div className="text-xs text-gray-600">Registrado por: {ultimoPedidoGuardado?.registeredBy || ticketData?.order?.recordedBy || 'Sistema'}</div>
             </div>
 

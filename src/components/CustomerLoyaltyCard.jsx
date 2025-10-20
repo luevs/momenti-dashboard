@@ -50,16 +50,28 @@ function CustomerLoyaltyCard({
       const activePrograms = (typePrograms && typePrograms.active) || [];
       const historicalPrograms = (typePrograms && typePrograms.historical) || [];
 
-      const activeMetersSum = activePrograms.reduce((sum, p) => sum + (p.remaining_meters || 0), 0);
+      const remainingMeters = activePrograms.reduce(
+        (sum, program) => sum + (Number(program.remaining_meters) || 0),
+        0
+      );
+
+      const totalMetersForType = [...activePrograms, ...historicalPrograms].reduce(
+        (sum, program) => sum + (Number(program.total_meters) || 0),
+        0
+      );
 
       programTypes.push({
         type,
-        activeMeters: activeMetersSum,
+        activeMeters: remainingMeters,
         activeCount: activePrograms.length,
-        totalCount: activePrograms.length + historicalPrograms.length
+        totalCount: activePrograms.length + historicalPrograms.length,
+        totalMeters: totalMetersForType,
+        folios: activePrograms
+          .map(program => program?.program_folio)
+          .filter(Boolean)
       });
 
-      totalActiveMeters += activeMetersSum;
+      totalActiveMeters += remainingMeters;
       totalPrograms += activePrograms.length + historicalPrograms.length;
       activeProgramsCount += activePrograms.length;
     });
@@ -173,6 +185,11 @@ function CustomerLoyaltyCard({
                   </div>
                   <div className="text-xl font-bold text-blue-600">{typeInfo.activeMeters.toFixed(2)}m</div>
                   <div className="text-xs text-gray-600">{typeInfo.activeCount} activo{typeInfo.activeCount !== 1 ? 's' : ''}</div>
+                  {typeInfo.folios?.length > 0 && (
+                    <div className="mt-1 text-[11px] text-gray-500 font-medium">
+                      Folios: {typeInfo.folios.join(', ')}
+                    </div>
+                  )}
                 </div>
               ))}
               
