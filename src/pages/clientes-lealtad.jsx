@@ -3,6 +3,7 @@ import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText, Slider
 import { supabase } from "../supabaseClient";
 import useCurrentUser from '../utils/useCurrentUser';
 import { generateTicketHTML } from '../utils/ticketUtils';
+import { getNextProgramFolio, generateRandomFolio3 } from '../utils/folioUtils';
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import SignatureCanvas from "react-signature-canvas";
@@ -115,7 +116,7 @@ export default function ClientesLealtad() {
   const [isLoading, setIsLoading] = useState(true);
   
   const [addClientModalOpen, setAddClientModalOpen] = useState(false);
-  const [newClientData, setNewClientData] = useState({ name: "", type: "DTF Textil", totalMeters: "", numeroWpp: "", lastPurchase: "" });
+  const [newClientData, setNewClientData] = useState({ name: "", type: "", totalMeters: "", numeroWpp: "", lastPurchase: "" });
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteReason, setDeleteReason] = useState([]);
@@ -367,9 +368,10 @@ export default function ClientesLealtad() {
         throw err;
       }
 
-      // 3) Preparar datos para modal Post-Pedido
-      const generatedFolio = Math.floor(Math.random() * 9000) + 1000;
-      const programFolio = selectedProgram.program_folio || String(generatedFolio);
+  // 3) Preparar datos para modal Post-Pedido
+  // Usar folio de 3 dígitos consistente para tickets
+  const generatedFolio = generateRandomFolio3();
+  const programFolio = selectedProgram.program_folio || String(generatedFolio);
       const ticketInfo = {
         client: {
           id: selectedCustomerForMeters.id,
@@ -524,7 +526,7 @@ export default function ClientesLealtad() {
           registeredBy: getCurrentUser(),
           observaciones: `Resumen del programa #${program?.program_number || ''}`,
           recordedAt: new Date().toISOString(),
-          folio: Math.floor(Math.random() * 9999) + 1000,
+          folio: generateRandomFolio3(),
           programFolio: program?.program_folio || ''
         }
       };
@@ -870,7 +872,7 @@ export default function ClientesLealtad() {
               registeredBy: registeredBy.trim(),
               observaciones: observaciones.trim(),
               recordedAt: new Date().toISOString(),
-              folio: Math.floor(Math.random() * 9999) + 1000
+              folio: generateRandomFolio3()
             }
           };
 
@@ -1024,7 +1026,7 @@ export default function ClientesLealtad() {
     setSelectedCustomerWhatsApp('');
     setSelectedCustomerPrograms([]);
     setAvailableProgramTypes(['DTF Textil', 'UV DTF']);
-    setNewClientData(prev => ({ ...prev, numeroWpp: '', type: 'DTF Textil' }));
+    setNewClientData(prev => ({ ...prev, numeroWpp: '', type: '' }));
     setShowCustomerDropdown(false);
   };
 
@@ -1036,7 +1038,14 @@ export default function ClientesLealtad() {
   }, [addClientModalOpen]);
 
   const handleAddClient = async () => {
-    const { type, totalMeters, numeroWpp, lastPurchase } = newClientData;
+    const { type: rawType, totalMeters, numeroWpp, lastPurchase } = newClientData;
+    // Normalizar y validar el tipo para evitar concatenaciones o valores inesperados
+    let normalizedType = (rawType || '').toString().trim();
+    const masterTypes = (availableProgramTypes && availableProgramTypes.length > 0) ? availableProgramTypes : ['DTF Textil', 'UV DTF'];
+    if (!normalizedType || !masterTypes.includes(normalizedType)) {
+      // Si el usuario no seleccionó o el valor no está en la lista, elegir el primer tipo disponible
+      normalizedType = masterTypes[0];
+    }
     
     // Solo permitir clientes existentes
     if (!selectedCustomerId) {
@@ -1050,7 +1059,7 @@ export default function ClientesLealtad() {
       return;
     }
 
-    if (!type || !totalMeters || !lastPurchase) {
+    if (!normalizedType || !totalMeters || !lastPurchase) {
       alert("Por favor, completa todos los campos obligatorios.");
       return;
     }
@@ -1085,33 +1094,17 @@ export default function ClientesLealtad() {
         return;
       }
 
-      const programsSameType = (existingProgramsAll || []).filter(program => (program.type || '').toLowerCase() === type.toLowerCase());
+      const programsSameType = (existingProgramsAll || []).filter(program => (program.type || '').toLowerCase() === normalizedType.toLowerCase());
       const nextProgramNumber = programsSameType.reduce((max, program) => {
         const num = parseInt(program.program_number, 10);
         return Number.isFinite(num) && num > max ? num : max;
       }, 0) + 1;
 
-      // Calcular folio global consecutivo de 3 dígitos
-      let nextProgramFolio = '001';
-      const { data: maxFolioData, error: maxFolioError } = await supabase
-        .from('loyalty_programs')
-        .select('program_folio')
-        .not('program_folio', 'is', null)
-        .order('program_folio', { ascending: false })
-        .limit(1);
-
-      if (maxFolioError) {
-        console.error('Error al calcular folio:', maxFolioError);
-        alert('No se pudo calcular el folio del programa. Intenta de nuevo.');
-        return;
-      }
-
-      if (maxFolioData && maxFolioData.length > 0) {
-        const currentFolioNum = parseInt(maxFolioData[0].program_folio, 10);
-        if (Number.isFinite(currentFolioNum)) {
-          const incremented = currentFolioNum + 1;
-          nextProgramFolio = String(Math.max(incremented, 1)).padStart(3, '0');
-        }
+      // Calcular folio global consecutivo de 3 dígitos usando helper
+      let nextProgramFolio = await getNextProgramFolio(supabase);
+      if (!nextProgramFolio) {
+        // Fallback a aleatorio de 3 dígitos si la consulta falla
+        nextProgramFolio = generateRandomFolio3();
       }
 
       // 2. Crear programa de lealtad usando la nueva estructura loyalty_programs
@@ -1119,7 +1112,7 @@ export default function ClientesLealtad() {
         .from('loyalty_programs')
         .insert([{
           customer_id: selectedCustomerId,
-          type: type,
+          type: normalizedType,
           total_meters: parseFloat(totalMeters),
           remaining_meters: parseFloat(totalMeters),
           status: 'activo',
@@ -1139,7 +1132,7 @@ export default function ClientesLealtad() {
       alert("Programa de lealtad agregado correctamente");
       setAddClientModalOpen(false);
       clearCustomerSelection();
-      setNewClientData({ name: "", type: "DTF Textil", totalMeters: "", numeroWpp: "", lastPurchase: "" });
+  setNewClientData({ name: "", type: "", totalMeters: "", numeroWpp: "", lastPurchase: "" });
       fetchCustomersWithPrograms();
 
     } catch (err) {
@@ -1619,9 +1612,14 @@ export default function ClientesLealtad() {
       // Usar selectCustomerFromDropdown para preseleccionar correctamente
       await selectCustomerFromDropdown(customer);
       setIsExistingCustomer(true);
+      // Preseleccionar el tipo: preferir tipos que el cliente ya tenga, si no, usar el primer availableProgramTypes
+      const preferredType = (customer.programs && Object.keys(customer.programs).length > 0)
+        ? Object.keys(customer.programs)[0]
+        : (availableProgramTypes && availableProgramTypes.length > 0 ? availableProgramTypes[0] : 'DTF Textil');
+
       setNewClientData({ 
         name: customer.razon_social, 
-        type: "DTF Textil", 
+        type: preferredType, 
         totalMeters: "", 
         numeroWpp: "", 
         lastPurchase: "" 
@@ -1690,7 +1688,7 @@ export default function ClientesLealtad() {
         registeredBy: record.recorded_by || 'Sistema',
         observaciones: record.observaciones || '',
         recordedAt: record.recorded_at || new Date().toISOString(),
-        folio: record.folio || Math.floor(Math.random() * 9999) + 1000,
+  folio: record.folio || generateRandomFolio3(),
         programFolio: activeProgramFolio || record.program_folio || ''
       }
     };
@@ -2221,7 +2219,7 @@ export default function ClientesLealtad() {
                 setAddClientModalOpen(false);
                 clearCustomerSelection();
                 setIsExistingCustomer(true);
-                setNewClientData({ name: "", type: "DTF Textil", totalMeters: "", numeroWpp: "", lastPurchase: "" });
+                setNewClientData({ name: "", type: "", totalMeters: "", numeroWpp: "", lastPurchase: "" });
               }}
               className="absolute top-3 right-3 text-gray-500 hover:text-black"
             >

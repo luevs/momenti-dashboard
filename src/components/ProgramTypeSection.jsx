@@ -12,6 +12,17 @@ export default function ProgramTypeSection({
   type = '',              // <-- aceptar type como prop
   customerId = null       // <-- aceptar customerId como prop (fallback abajo)
 }) {
+  const formatFolioDisplay = (folio) => {
+    if (!folio) return '';
+    const s = String(folio).trim();
+    const parts = s.split(/[^0-9]+/).filter(Boolean);
+    if (parts.length > 0) {
+      const last = parts[parts.length - 1];
+      if (last.length >= 3) return last.slice(-3);
+      return last.padStart(3, '0');
+    }
+    return s.slice(-3).padStart(3, '0');
+  };
   // DEBUG: log incoming props to diagnose button issues
   try {
     console.log('ProgramTypeSection props:', { type, customerId, customer, programs, hasWhatsApp: !!onProgramWhatsApp, hasPrint: !!onProgramPrint });
@@ -127,7 +138,7 @@ export default function ProgramTypeSection({
                   </span>
                   {program.program_folio && (
                     <span className="text-xs font-semibold uppercase tracking-wide bg-gray-900/10 text-gray-700 px-2 py-1 rounded-full">
-                      Folio {program.program_folio}
+                      Folio {formatFolioDisplay(program.program_folio)}
                     </span>
                   )}
                 </span>

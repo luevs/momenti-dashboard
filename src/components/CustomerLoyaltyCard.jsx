@@ -39,6 +39,20 @@ function CustomerLoyaltyCard({
   onProgramPrint,
   onOpenProgramHistory
 }) {
+  // Helper display-only para mostrar folios como 3 dígitos
+  const formatFolioDisplay = (folio) => {
+    if (!folio) return '';
+    const s = String(folio).trim();
+    // Buscar la última secuencia de 1-3 dígitos al final
+    const parts = s.split(/[^0-9]+/).filter(Boolean);
+    if (parts.length > 0) {
+      const last = parts[parts.length - 1];
+      // Si la última parte tiene más de 3 dígitos, tomar los últimos 3
+      if (last.length >= 3) return last.slice(-3);
+      return last.padStart(3, '0');
+    }
+    return s.slice(-3).padStart(3, '0');
+  };
   // Calcular métricas del cliente
   const calculateMetrics = () => {
     let totalActiveMeters = 0;
@@ -187,7 +201,7 @@ function CustomerLoyaltyCard({
                   <div className="text-xs text-gray-600">{typeInfo.activeCount} activo{typeInfo.activeCount !== 1 ? 's' : ''}</div>
                   {typeInfo.folios?.length > 0 && (
                     <div className="mt-1 text-[11px] text-gray-500 font-medium">
-                      Folios: {typeInfo.folios.join(', ')}
+                      Folios: {typeInfo.folios.map(f => formatFolioDisplay(f)).join(', ')}
                     </div>
                   )}
                 </div>
