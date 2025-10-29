@@ -243,14 +243,20 @@ function CustomerLoyaltyCard({
               Historial
             </button>
             <button
-              onClick={() => onAddProgram(customer.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddProgram(customer.id);
+              }}
               className="flex items-center gap-1 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
             >
               <Plus size={16} />
               Programa
             </button>
             <button
-              onClick={onToggleExpand}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleExpand();
+              }}
               className="flex items-center gap-1 px-3 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
             >
               {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -284,7 +290,10 @@ function CustomerLoyaltyCard({
                 <div className="text-4xl mb-2">📋</div>
                 <p>Este cliente no tiene programas de lealtad aún</p>
                 <button
-                  onClick={() => onAddProgram(customer.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAddProgram(customer.id);
+                  }}
                   className="mt-2 text-blue-600 hover:text-blue-800 font-medium"
                 >
                   Crear primer programa

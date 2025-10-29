@@ -201,15 +201,42 @@ export default function ProgramTypeSection({
                 Historial
               </button>
               
-              {/* Botón WhatsApp */}
-              <button
-                onClick={() => onProgramWhatsApp && onProgramWhatsApp(customer, program)}
-                className="text-sm px-2 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200 flex items-center gap-1"
-                title="Enviar mensaje de WhatsApp"
-              >
-                <MessageCircle size={14} />
-                WhatsApp
-              </button>
+              {/* Botn WhatsApp - usar <a> con href directo para evitar bloqueos de popup */}
+              {(() => {
+                const phoneRaw = customer?.celular || customer?.numeroWpp || customer?.numero_wpp || program?.numero_wpp || '';
+                const phone = String(phoneRaw || '').replace(/\D/g, '').trim();
+                if (phone && phone.length >= 8) {
+                  const tipo = program?.type || customer?.type || '';
+                  const fecha = program?.purchase_date ? new Date(program.purchase_date).toLocaleDateString('es-MX') : new Date().toLocaleDateString('es-MX');
+                  const metrosConsumidos = Number(((program?.total_meters || 0) - (program?.remaining_meters || 0)).toFixed(2));
+                  const metrosRestantes = Number((program?.remaining_meters || 0).toFixed(2));
+                  const message = `Saludos ${customer?.razon_social || customer?.name || ''}\nLe informamos que su pedido de ${tipo} ya está listo para que pase por el.\nEl día ${fecha} consumiste ${metrosConsumidos.toFixed(2)} metros de tu programa de lealtad ${tipo}. Te quedan ${metrosRestantes.toFixed(2)} metros en tu plan. ¡Gracias por tu preferencia!`;
+                  const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+                  return (
+                    <a
+                      href={waUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm px-2 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200 flex items-center gap-1"
+                      title="Enviar mensaje de WhatsApp"
+                    >
+                      <MessageCircle size={14} />
+                      WhatsApp
+                    </a>
+                  );
+                }
+                // Fallback: si no hay número válido, mantener el botón que usa el handler (muestra alert en el handler)
+                return (
+                  <button
+                    onClick={() => onProgramWhatsApp && onProgramWhatsApp(customer, program)}
+                    className="text-sm px-2 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200 flex items-center gap-1"
+                    title="Enviar mensaje de WhatsApp"
+                  >
+                    <MessageCircle size={14} />
+                    WhatsApp
+                  </button>
+                );
+              })()}
               
               {/* Botón Imprimir */}
               <button

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Printer, BarChart2, ClipboardList, Users, Settings, DollarSign, Package2, LogOut, FileImage } from 'lucide-react';
+import { LayoutDashboard, Printer, BarChart2, ClipboardList, Users, Settings, DollarSign, Package2, LogOut, FileImage, Receipt, Calculator, PieChart, Tag } from 'lucide-react';
 import { isAdmin } from '../utils/auth';
 import { supabase } from '../supabaseClient';
 import useCurrentUser from '../utils/useCurrentUser';
@@ -31,7 +31,15 @@ export default function Layout({ children }) {
         { path: '/clientes-lealtad', label: 'Clientes Lealtad', icon: Users },
       ]
     },
-    { path: '/corte', label: 'Corte', icon: DollarSign },
+    {
+      path: '/caja', label: 'Caja', icon: DollarSign,
+      children: [
+        { path: '/caja/movimientos', label: 'Movimientos', icon: Receipt },
+        { path: '/caja/cortes', label: 'Cortes de Caja', icon: Calculator },
+        { path: '/caja/reportes', label: 'Reportes', icon: PieChart },
+        { path: '/caja/categorias', label: 'Categorías', icon: Tag },
+      ]
+    },
     ...( (currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin')) || isAdmin() ? [
       { path: '/configuracion', label: 'Configuración', icon: Settings },
       { path: '/usuarios', label: 'Usuarios', icon: Users },
@@ -144,6 +152,10 @@ export default function Layout({ children }) {
                   if (path === '/insumos') return 'Gestión de Insumos';
                   if (path === '/reportes') return 'Reportes y Análisis';
                   if (path === '/corte') return 'Corte de Caja';
+                  if (path === '/caja' || path === '/caja/movimientos') return 'Gestión de Caja - Movimientos';
+                  if (path === '/caja/cortes') return 'Corte de Caja';
+                  if (path === '/caja/reportes') return 'Gestión de Caja - Reportes';
+                  if (path === '/caja/categorias') return 'Gestión de Caja - Categorías';
                   if (path === '/configuracion') return 'Configuración del Sistema';
                   if (path === '/usuarios') return 'Gestión de Usuarios';
                   

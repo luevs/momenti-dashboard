@@ -108,9 +108,6 @@ export default function ClientesLealtad() {
   const getCurrentUser = () => (currentUser?.name || currentUser?.email || 'Sistema');
   const [allClients, setAllClients] = useState([]);
   const [clientes, setClientes] = useState([]); // filtrados por tipo
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedClient, setSelectedClient] = useState(null);
-  const [metrosConsumidos, setMetrosConsumidos] = useState("");
   const [customersWithPrograms, setCustomersWithPrograms] = useState([]);
   const [expandedCustomers, setExpandedCustomers] = useState([]); // Para controlar qué cards están expandidas
   const [isLoading, setIsLoading] = useState(true);
@@ -132,14 +129,16 @@ export default function ClientesLealtad() {
 
   // Estados para el historial
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [selectedClient, setSelectedClient] = useState(null);
   const [clientHistory, setClientHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyTypeFilter, setHistoryTypeFilter] = useState(null);
   
-  // Estados para el modal de pedido mejorado
+  // Estados para modales de registro
   const [observaciones, setObservaciones] = useState("");
   const [registeredBy, setRegisteredBy] = useState(() => currentUser?.name || currentUser?.email || 'Sistema');
   const [registeredByCustom, setRegisteredByCustom] = useState("");
+  const [autorizacionCliente, setAutorizacionCliente] = useState(false);
 
   // Nuevos estados para el historial global
   const [globalHistoryModalOpen, setGlobalHistoryModalOpen] = useState(false);
@@ -159,7 +158,6 @@ export default function ClientesLealtad() {
   // Estados adicionales
   const [signatureData, setSignatureData] = useState("");
   const signatureRef = React.useRef();
-  const [autorizacionCliente, setAutorizacionCliente] = useState(false);
 
   const [selectedType, setSelectedType] = useState('Todos');
   const [viewMode, setViewMode] = useState('cards');
@@ -448,7 +446,17 @@ export default function ClientesLealtad() {
     const fecha = pedido.recordedAt ? new Date(pedido.recordedAt).toLocaleDateString('es-MX') : new Date().toLocaleDateString('es-MX');
     const metros = pedido.metersConsumed || 0;
     const restantes = ticketData.client?.remainingMeters ?? '';
-  const programFolio = pedido.programFolio || cliente.programFolio || '';
+  // Prefer the canonical program folio stored on the client/program record
+  // (support both camelCase and snake_case), then fall back to the order folio.
+  const programFolioRaw = cliente.programFolio || cliente.program_folio || pedido.programFolio || pedido.program_folio || '';
+  const formatFolio = (f) => {
+    if (!f && f !== 0) return '';
+    const s = String(f).trim();
+    const groups = s.split(/[^0-9]+/).filter(Boolean);
+    const last = groups.length > 0 ? groups[groups.length - 1] : s;
+    return last.length >= 3 ? last.slice(-3) : last.padStart(3, '0');
+  };
+  const programFolio = formatFolio(programFolioRaw);
 
     console.log('📊 WhatsApp Message Data:', {
       cliente,
@@ -460,26 +468,38 @@ export default function ClientesLealtad() {
       fullTicketData: ticketData
     });
 
-    // ✅ SIEMPRE usar customers_.celular
-    const phoneRaw = cliente.celular || cliente.loyaltyProgramPhone || '';
-    const phone = phoneRaw.replace(/\D/g, '');
-    console.log('📱 WhatsApp phone source:', { 
-      phoneRaw, 
-      phone, 
-      clientData: cliente 
-    });
-    
+    // ✅ SIEMPRE usar customers_.celular (intentar varias claves)
+    const phoneRaw = cliente?.celular || cliente?.numeroWpp || cliente?.numero_wpp || cliente?.loyaltyProgramPhone || '';
+    const phone = String(phoneRaw || '').replace(/\D/g, '').trim();
+    console.log('📱 WhatsApp phone source (post-pedido):', { phoneRaw, phone, clientData: cliente });
+
     if (!phone) {
-      alert('No hay número de WhatsApp registrado en el programa de lealtad');
+      alert('No hay número de WhatsApp registrado en el programa de lealtad. Revisa el dato del cliente.');
+      return;
+    }
+    // Phone sanity check: must be reasonably long (country+number). If clearly invalid, show details.
+    if (phone.length < 8) {
+      alert(`Número de WhatsApp inválido: "${phoneRaw}" (normalizado: "${phone}"). Corrige el número antes de enviar.`);
       return;
     }
 
   const metrosTxt = typeof metros === 'number' ? metros.toFixed(2) : metros;
   const restantesTxt = typeof restantes === 'number' ? restantes.toFixed(2) : restantes;
-  const folioLine = programFolio ? `\nFolio del programa: ${programFolio}` : '';
-  const message = `Saludos ${cliente.name}\nLe informamos que su pedido de ${tipo} ya está listo para que pase por el.${folioLine}\nEl día ${fecha} consumiste ${metrosTxt} metros de tu programa de lealtad ${tipo}. Te quedan ${restantesTxt} metros en tu plan. ¡Gracias por tu preferencia!`;
+  // Temporarily remove folio line for debugging (it caused failures for some phones)
+  const message = `Saludos ${cliente.name}\nLe informamos que su pedido de ${tipo} ya está listo para que pase por el.\nEl día ${fecha} consumiste ${metrosTxt} metros de tu programa de lealtad ${tipo}. Te quedan ${restantesTxt} metros en tu plan. ¡Gracias por tu preferencia!`;
     const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank');
+    console.log('🔗 Generando enlace WhatsApp (post-pedido):', url);
+    try {
+      const opened = window.open(url, '_blank');
+      if (!opened) {
+        // Popup blocked, fallback to navigating the page
+        console.warn('window.open fue bloqueado, redirigiendo a la URL');
+        window.location.href = url;
+      }
+    } catch (err) {
+      console.error('Error al abrir el enlace de WhatsApp:', err);
+      window.location.href = url;
+    }
   };
 
     // Enviar WhatsApp para un programa específico
@@ -487,10 +507,15 @@ export default function ClientesLealtad() {
       console.log('handleProgramWhatsApp called with:', { customer, program });
       // Use the same WhatsApp template as post-pedido
       const nombre = customer?.razon_social || customer?.name || '';
-  const phoneRaw = customer?.celular || program?.numero_wpp || customer?.numeroWpp || '';
-      const phone = (phoneRaw || '').replace(/\D/g, '');
+      const phoneRaw = customer?.celular || customer?.numeroWpp || customer?.numero_wpp || program?.numero_wpp || '';
+      const phone = String(phoneRaw || '').replace(/\D/g, '').trim();
+      console.log('📱 WhatsApp phone source (program):', { phoneRaw, phone, customer, program });
       if (!phone) {
-        alert('No hay número válido para enviar WhatsApp');
+        alert('No hay número válido para enviar WhatsApp. Revisa el cliente y el programa.');
+        return;
+      }
+      if (phone.length < 8) {
+        alert(`Número de WhatsApp inválido: "${phoneRaw}" (normalizado: "${phone}").`);
         return;
       }
 
@@ -498,12 +523,30 @@ export default function ClientesLealtad() {
       const fecha = program?.purchase_date ? new Date(program.purchase_date).toLocaleDateString('es-MX') : new Date().toLocaleDateString('es-MX');
       const metrosConsumidos = Number(((program?.total_meters || 0) - (program?.remaining_meters || 0)).toFixed(2));
       const metrosRestantes = Number((program?.remaining_meters || 0).toFixed(2));
-  const programFolio = program?.program_folio || '';
+  const programFolioRaw = program?.program_folio || program?.programFolio || customer?.programFolio || customer?.program_folio || '';
+  const programFolio = (f => {
+    if (!f && f !== 0) return '';
+    const s = String(f).trim();
+    const groups = s.split(/[^0-9]+/).filter(Boolean);
+    const last = groups.length > 0 ? groups[groups.length - 1] : s;
+    return last.length >= 3 ? last.slice(-3) : last.padStart(3, '0');
+  })(programFolioRaw);
 
-  const folioLine = programFolio ? `\nFolio del programa: ${programFolio}` : '';
-  const message = `Saludos ${nombre}\nLe informamos que su pedido de ${tipo} ya está listo para que pase por el.${folioLine}\nEl día ${fecha} consumiste ${metrosConsumidos.toFixed(2)} metros de tu programa de lealtad ${tipo}. Te quedan ${metrosRestantes.toFixed(2)} metros en tu plan. ¡Gracias por tu preferencia!`;
+  // Temporarily remove folio line for debugging
+  const message = `Saludos ${nombre}\nLe informamos que su pedido de ${tipo} ya está listo para que pase por el.\nEl día ${fecha} consumiste ${metrosConsumidos.toFixed(2)} metros de tu programa de lealtad ${tipo}. Te quedan ${metrosRestantes.toFixed(2)} metros en tu plan. ¡Gracias por tu preferencia!`;
       const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-      window.open(url, '_blank');
+      console.log('🔗 Generando enlace WhatsApp (program):', url);
+      try {
+        const opened = window.open(url, '_blank');
+        if (!opened) {
+          console.warn('window.open fue bloqueado, redirigiendo a la URL (program)');
+          window.location.href = url;
+        }
+      } catch (err) {
+        console.error('Error al abrir el enlace de WhatsApp (program):', err);
+        window.location.href = url;
+      }
+      // NOTE: no llamar window.open nuevamente aquí (ya intentamos arriba).
     };
 
     // Imprimir ticket resumen para un programa específico
@@ -696,20 +739,6 @@ export default function ClientesLealtad() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showFilters]);
 
-  const abrirModal = (cliente) => {
-    setSelectedClient(cliente);
-    setModalOpen(true);
-    setObservaciones("");
-    setRegisteredBy(getCurrentUser());
-  };
-
-  const cerrarModal = () => {
-    setModalOpen(false);
-    setSelectedClient(null);
-    setMetrosConsumidos("");
-    setObservaciones("");
-  };
-
   // Función para obtener historial de un cliente (opcionalmente filtrado por programa)
   const getClientHistory = async (clientId, programId = null) => {
     setIsLoadingHistory(true);
@@ -784,118 +813,6 @@ export default function ClientesLealtad() {
     setSelectedClient(null);
     setClientHistory([]);
     setHistoryTypeFilter(null);
-  };
-
-  // Función mejorada para registrar pedido con historial
-  const registrarPedido = async () => {
-    if (!autorizacionCliente) {
-      alert("Por favor, confirma la autorización del cliente.");
-      return;
-    }
-
-    if (!selectedClient || !metrosConsumidos || isNaN(parseFloat(metrosConsumidos)) || parseFloat(metrosConsumidos) <= 0) {
-      alert("Por favor, ingresa una cantidad de metros válida.");
-      return;
-    }
-
-    if (!registeredBy.trim()) {
-      alert("Por favor, ingresa quién está registrando el pedido.");
-      return;
-    }
-
-    try {
-      const metros = parseFloat(metrosConsumidos);
-      // preserve two decimals (do not round to 1 decimal)
-      const metrosRounded = Number(metros.toFixed(2));
-      const newRemaining = Number((selectedClient.remainingMeters - metrosRounded).toFixed(2));
-      
-      // 1. Primero guardamos el historial del pedido
-      // Insert into order_history and log full response for debugging
-      const insHistory = await supabase
-        .from('order_history')
-        .insert([
-          {
-            client_name: selectedClient.name || selectedClient.razon_social,
-            type: selectedClient.type,
-            meters_consumed: metrosRounded,
-            recorded_at: new Date().toISOString(),
-            recorded_by: registeredBy.trim(),
-            observaciones: observaciones.trim() || null,
-            customer_id: selectedClient.id,
-            program_id: null,
-            signature: null
-          }
-        ])
-        .select();
-
-      console.log('order_history insert response', insHistory);
-
-      if (insHistory.error) {
-        console.error("Error al guardar historial:", insHistory.error);
-        alert("Hubo un error al guardar la eliminación. Intenta de nuevo. Detalles: " + insHistory.error.message);
-        return;
-      }
-
-      // 2. Si el historial se guardó correctamente, actualizamos el cliente
-      const { data, error } = await supabase
-        .from('loyalty_clients')
-        .update({ 
-          remainingMeters: newRemaining,
-          status: getClientStatus(newRemaining, selectedClient.totalMeters),
-          lastPurchase: new Date().toISOString().slice(0, 10)
-        })
-        .eq('id', selectedClient.id)
-        .select();
-
-      if (error) {
-        console.error("Error al actualizar el cliente en Supabase:", error);
-        alert("Hubo un error al actualizar los metros: " + error.message);
-        
-        // Si falla la actualización del cliente, eliminamos el registro del historial
-        await supabase
-          .from('order_history')
-          .delete()
-          .eq('id', historyData[0].id);
-      } else {
-        // NUEVA LÓGICA - PREPARAR DATOS DEL TICKET
-          const ticketInfo = {
-            client: {
-              id: selectedClient.id,
-              name: selectedClient.name,
-              type: selectedClient.type,
-              totalMeters: selectedClient.totalMeters,
-              remainingMeters: newRemaining, // Metros después del pedido (2 decimals)
-              loyaltyProgramPhone: selectedClient.loyaltyProgramPhone || selectedClient.numeroWpp || '' // ✅ Usar loyaltyProgramPhone
-            },
-            order: {
-              metersConsumed: metrosRounded,
-              registeredBy: registeredBy.trim(),
-              observaciones: observaciones.trim(),
-              recordedAt: new Date().toISOString(),
-              folio: generateRandomFolio3()
-            }
-          };
-
-        // Guardado exitoso - preparar datos para ambos modales
-        setUltimoPedidoGuardado({
-          customerName: selectedClient.name || selectedClient.razon_social || '',
-          metros: Number(metrosRounded.toFixed ? metrosRounded.toFixed(2) : metrosRounded),
-          type: selectedClient.type || '',
-          registeredBy: registeredBy.trim() || 'Sistema',
-          observaciones: observaciones || ''
-        });
-
-        // PREPARAR DATOS DEL TICKET
-        setTicketData(ticketInfo);
-
-        cerrarModal();
-        setPostPedidoModalOpen(true);
-        fetchClients();
-      }
-    } catch (err) {
-      console.error("Error inesperado en registrarPedido:", err);
-      alert("Ocurrió un error inesperado. Revisa la consola para más detalles.");
-    }
   };
 
   const [existingCustomers, setExistingCustomers] = useState([]);
@@ -1082,15 +999,26 @@ export default function ClientesLealtad() {
         }
       }
 
-      // Obtener programas existentes del cliente para calcular número consecutivo
+      // Obtener programas existentes del cliente para calcular número consecutivo y validar duplicados
       const { data: existingProgramsAll, error: existingProgramsError } = await supabase
         .from('loyalty_programs')
-        .select('program_number, type')
+        .select('program_number, type, status')
         .eq('customer_id', selectedCustomerId);
 
       if (existingProgramsError) {
         console.error('Error al consultar programas existentes:', existingProgramsError);
         alert('No se pudo calcular el número del programa. Intenta de nuevo.');
+        return;
+      }
+
+      // Validar que no exista un programa activo del mismo tipo
+      const activeProgramsSameType = (existingProgramsAll || []).filter(program => 
+        (program.type || '').toLowerCase() === normalizedType.toLowerCase() && 
+        (program.status || '').toLowerCase() === 'activo'
+      );
+
+      if (activeProgramsSameType.length > 0) {
+        alert(`No se puede agregar el programa. El cliente ya tiene un programa activo de tipo "${normalizedType}". Debe completar o cerrar el programa actual antes de crear uno nuevo.`);
         return;
       }
 
@@ -1605,26 +1533,69 @@ export default function ClientesLealtad() {
     return expandedCustomers.includes(customerId);
   };
 
-  // Modificar handleAddClient para usar customer_id directamente y preseleccionar cliente
+  // Abrir modal para agregar programa a cliente existente
   const openAddProgramModal = async (customerId) => {
+    console.log('🚀 openAddProgramModal called with customerId:', customerId);
+    console.log('🔍 Current addClientModalOpen state:', addClientModalOpen);
+    
     const customer = customersWithPrograms.find(c => c.id === customerId);
     if (customer) {
-      // Usar selectCustomerFromDropdown para preseleccionar correctamente
-      await selectCustomerFromDropdown(customer);
-      setIsExistingCustomer(true);
-      // Preseleccionar el tipo: preferir tipos que el cliente ya tenga, si no, usar el primer availableProgramTypes
-      const preferredType = (customer.programs && Object.keys(customer.programs).length > 0)
-        ? Object.keys(customer.programs)[0]
-        : (availableProgramTypes && availableProgramTypes.length > 0 ? availableProgramTypes[0] : 'DTF Textil');
+      console.log('✅ Customer found:', customer.razon_social);
+      
+      try {
+        // Cargar programas activos directamente
+        console.log('⏳ Loading customer programs directly from DB...');
+        const { data: programs, error } = await supabase
+          .from('loyalty_programs')
+          .select('type, status, remaining_meters, total_meters')
+          .eq('customer_id', customerId)
+          .eq('status', 'activo');
 
-      setNewClientData({ 
-        name: customer.razon_social, 
-        type: preferredType, 
-        totalMeters: "", 
-        numeroWpp: "", 
-        lastPurchase: "" 
-      });
-      setAddClientModalOpen(true);
+        if (error) {
+          console.error("Error al consultar programas:", error);
+          setSelectedCustomerPrograms([]);
+          setAvailableProgramTypes(['DTF Textil', 'UV DTF']);
+        } else {
+          const activePrograms = programs || [];
+          console.log('✅ Programs loaded:', activePrograms);
+          setSelectedCustomerPrograms(activePrograms);
+          
+          // Filtrar tipos disponibles (excluir los que ya tienen programa activo)
+          const existingTypes = activePrograms.map(p => p.type);
+          const allTypes = ['DTF Textil', 'UV DTF'];
+          const availableTypes = allTypes.filter(type => !existingTypes.includes(type));
+          setAvailableProgramTypes(availableTypes);
+        }
+
+        // Preseleccionar cliente
+        setSelectedCustomerId(customerId);
+        setSelectedCustomerName(customer.razon_social);
+        setCustomerSearchQuery(customer.razon_social);
+        setSelectedCustomerWhatsApp(customer.celular || '');
+        setIsExistingCustomer(true);
+        
+        // Preseleccionar el tipo: preferir UV DTF si está disponible, sino DTF Textil
+        const preferredType = availableProgramTypes.includes('UV DTF') ? 'UV DTF' : 
+                            availableProgramTypes.includes('DTF Textil') ? 'DTF Textil' : 
+                            availableProgramTypes[0] || 'DTF Textil';
+
+        setNewClientData({ 
+          name: customer.razon_social, 
+          type: preferredType, 
+          totalMeters: "", 
+          numeroWpp: customer.celular || "", 
+          lastPurchase: "" 
+        });
+        
+        console.log('📝 Setting addClientModalOpen to true');
+        setAddClientModalOpen(true);
+        
+      } catch (error) {
+        console.error('Error en openAddProgramModal:', error);
+        alert('Error al cargar los programas del cliente');
+      }
+    } else {
+      console.log('❌ Customer not found with id:', customerId);
     }
   };
 
@@ -1857,108 +1828,6 @@ export default function ClientesLealtad() {
           </div>
         </div>
       </div>
-
-      {/* MODAL MEJORADO para registrar pedido */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
-          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-lg relative">
-            <button
-              onClick={cerrarModal}
-              className="absolute top-3 right-3 text-gray-500 hover:text-black"
-            >
-              <X />
-            </button>
-            <h2 className="text-xl font-semibold mb-4">
-              Registrar pedido para {selectedClient?.name}
-            </h2>
-            <div className="flex flex-col gap-4">
-              <div>
-                <label className="block text-gray-700 font-bold mb-2">Metros consumidos *</label>
-                <input
-                  type="number"
-                  placeholder="Metros consumidos"
-                  value={metrosConsumidos}
-                  onChange={(e) => setMetrosConsumidos(e.target.value)}
-                  className="border rounded px-3 py-2 w-full"
-                  min="0"
-                  step="0.01"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-gray-700 font-bold mb-2">Registrado por *</label>
-                <select
-                  value={registeredBy}
-                  onChange={e => setRegisteredBy(e.target.value)}
-                  className="border rounded px-3 py-2 w-full"
-                >
-                  <option value="">Selecciona...</option>
-                  <option value="Jasiel">Jasiel</option>
-                  <option value="Daniela">Daniela</option>
-                  <option value="Karla">Karla</option>
-                  <option value="Eduardo">Eduardo</option>
-                  <option value="Otro">Otro</option>
-                </select>
-                {registeredBy === "Otro" && (
-                  <input
-                    type="text"
-                    placeholder="Escribe el nombre"
-                    value={registeredByCustom}
-                    onChange={e => setRegisteredByCustom(e.target.value)}
-                    className="border rounded px-3 py-2 w-full mt-2"
-                  />
-                )}
-              </div>
-
-              <div>
-                <label className="block text-gray-700 font-bold mb-2">Observaciones</label>
-                <textarea
-                  placeholder="Notas adicionales (opcional)"
-                  value={observaciones}
-                  onChange={(e) => setObservaciones(e.target.value)}
-                  className="border rounded px-3 py-2 w-full h-20 resize-none"
-                />
-              </div>
-
-              {selectedClient && (
-                <div className="bg-gray-50 p-3 rounded text-sm">
-                  <p>
-                    <strong>Metros restantes actuales:</strong> {parseFloat(selectedClient.remainingMeters.toFixed(2))}m
-                  </p>
-                  <p>
-                    <strong>Después del pedido:</strong>{" "}
-                    {parseFloat((selectedClient.remainingMeters - parseFloat(metrosConsumidos || 0)).toFixed(2))}m
-                  </p>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-gray-700 font-bold mb-2">
-                  Autorización del cliente *
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={autorizacionCliente}
-                    onChange={e => setAutorizacionCliente(e.target.checked)}
-                    id="autorizacionCliente"
-                  />
-                  <label htmlFor="autorizacionCliente" className="text-sm text-gray-700">
-                    El cliente autoriza este pedido y está conforme.
-                  </label>
-                </div>
-              </div>
-
-              <button
-                onClick={registrarPedido}
-                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-              >
-                Guardar Pedido
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* MODAL DE HISTORIAL */}
       {historyModalOpen && (
@@ -2216,6 +2085,7 @@ export default function ClientesLealtad() {
           <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-lg relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => {
+                console.log('❌ Closing addClientModal');
                 setAddClientModalOpen(false);
                 clearCustomerSelection();
                 setIsExistingCustomer(true);
@@ -2710,9 +2580,34 @@ export default function ClientesLealtad() {
               <button onClick={handleGenerateTicket} className="w-full bg-blue-600 text-white px-4 py-2 rounded">
                 Generar Ticket de Lealtad
               </button>
-              <button onClick={handleSendWhatsApp} className="w-full bg-green-600 text-white px-4 py-2 rounded">
-                Enviar WhatsApp
-              </button>
+              {/* Enlace directo a WhatsApp para evitar que window.open sea bloqueado por popups */}
+              {(() => {
+                const cliente = ticketData?.client || {};
+                const pedido = ticketData?.order || {};
+                const phoneRaw = cliente?.celular || cliente?.numeroWpp || cliente?.numero_wpp || cliente?.loyaltyProgramPhone || '';
+                const phone = String(phoneRaw || '').replace(/\D/g, '').trim();
+                if (phone && phone.length >= 8) {
+                  const tipo = cliente?.type || '';
+                  const fecha = pedido?.recordedAt ? new Date(pedido.recordedAt).toLocaleDateString('es-MX') : new Date().toLocaleDateString('es-MX');
+                  const metros = pedido?.metersConsumed || 0;
+                  const restantes = cliente?.remainingMeters ?? '';
+                  const metrosTxt = typeof metros === 'number' ? metros.toFixed(2) : metros;
+                  const restantesTxt = typeof restantes === 'number' ? restantes.toFixed(2) : restantes;
+                  const message = `Saludos ${cliente.name || ''}\nLe informamos que su pedido de ${tipo} ya está listo para que pase por el.\nEl día ${fecha} consumiste ${metrosTxt} metros de tu programa de lealtad ${tipo}. Te quedan ${restantesTxt} metros en tu plan. ¡Gracias por tu preferencia!`;
+                  const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+                  return (
+                    <a href={url} target="_blank" rel="noopener noreferrer" className="w-full inline-block text-center bg-green-600 text-white px-4 py-2 rounded">
+                      Enviar WhatsApp
+                    </a>
+                  );
+                }
+                // Fallback: si no hay número válido, usar el botón que ejecuta la función con alert
+                return (
+                  <button onClick={handleSendWhatsApp} className="w-full bg-green-600 text-white px-4 py-2 rounded">
+                    Enviar WhatsApp
+                  </button>
+                );
+              })()}
               <button onClick={closePostPedidoModal} className="w-full bg-gray-200 px-4 py-2 rounded">
                 Cerrar
               </button>

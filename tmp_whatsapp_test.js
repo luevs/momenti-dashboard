@@ -1,0 +1,16 @@
+const cliente = { name: 'ALE ROBLES', celular: '' };
+const tipo = 'DTF Textil';
+const fecha = '21/10/2025';
+const metrosTxt = '1.90';
+const restantesTxt = '8.10';
+const programFolioRaw = '58';
+const s = String(programFolioRaw).trim();
+const groups = s.split(/[^0-9]+/).filter(Boolean);
+const last = groups.length > 0 ? groups[groups.length - 1] : s;
+const programFolio = last.length >= 3 ? last.slice(-3) : last.padStart(3, '0');
+const folioLine = programFolio ? `\nFolio del programa: ${programFolio}` : '';
+const message = `Saludos ${cliente.name}\nLe informamos que su pedido de ${tipo} ya está listo para que pase por el.${folioLine}\nEl día ${fecha} consumiste ${metrosTxt} metros de tu programa de lealtad ${tipo}. Te quedan ${restantesTxt} metros en tu plan. ¡Gracias por tu preferencia!`;
+const phone = '6141003807';
+console.log(`URL: https://wa.me/${phone}?text=${encodeURIComponent(message)}`);
+console.log('Decoded message:');
+console.log(decodeURIComponent(encodeURIComponent(message)));

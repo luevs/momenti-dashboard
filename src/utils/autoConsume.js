@@ -46,7 +46,12 @@ const buildMovementPayload = ({
       notes: movementType === 'consumption'
         ? `Consumo automático por ${productionDate}`
         : `Ajuste automático por modificación del corte ${productionDate}`,
-      production_record_id: productionRecordId || null,
+      // Only attach production_record_id when it looks like a canonical UUID
+      // (8-4-4-4-12 hex chars). If the caller passes a numeric id (e.g. 148)
+      // or other non-UUID string, store null to avoid DB errors.
+      production_record_id: (typeof productionRecordId === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(productionRecordId))
+        ? productionRecordId
+        : (productionRecordId ? (console.warn('autoConsume: productionRecordId is not a UUID, dropping it:', productionRecordId), null) : null),
       recorded_at: recordedAt,
     },
     stockUpdate: {
@@ -95,21 +100,51 @@ export const autoConsumeAfterProduction = async ({
       metersAccountedAfter: accountedAfter,
     });
 
-    const { error: movementError } = await supabase.from('supply_movements').insert([movement]);
-    if (movementError) throw movementError;
-
-    const { error: updateError } = await supabase
-      .from('machine_supplies')
-      .update(stockUpdate)
-      .eq('id', supply.id);
-    if (updateError) throw updateError;
-
-    summary.push({
-      name: supply?.supply_types?.name || `Insumo ${supply.supply_type_id}`,
-      amount: quantity,
-      unit: supply?.supply_types?.unit || '',
-      type: consuming ? 'consumption' : 'adjustment',
-    });
+    try {
+      const { error: movementError } = await supabase.from('supply_movements').insert([movement]);
+      if (movementError) {
+        // record the error but continue processing other supplies
+        console.error('Error inserting supply_movement', movementError);
+        summary.push({
+          name: supply?.supply_types?.name || `Insumo ${supply.supply_type_id}`,
+          amount: quantity,
+          unit: supply?.supply_types?.unit || '',
+          type: 'error',
+          error: movementError.message || String(movementError),
+        });
+      } else {
+        const { error: updateError } = await supabase
+          .from('machine_supplies')
+          .update(stockUpdate)
+          .eq('id', supply.id);
+        if (updateError) {
+          console.error('Error updating machine_supplies', updateError);
+          summary.push({
+            name: supply?.supply_types?.name || `Insumo ${supply.supply_type_id}`,
+            amount: quantity,
+            unit: supply?.supply_types?.unit || '',
+            type: 'error',
+            error: updateError.message || String(updateError),
+          });
+        } else {
+          summary.push({
+            name: supply?.supply_types?.name || `Insumo ${supply.supply_type_id}`,
+            amount: quantity,
+            unit: supply?.supply_types?.unit || '',
+            type: consuming ? 'consumption' : 'adjustment',
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Unexpected error during autoConsume processing', e);
+      summary.push({
+        name: supply?.supply_types?.name || `Insumo ${supply.supply_type_id}`,
+        amount: quantity,
+        unit: supply?.supply_types?.unit || '',
+        type: 'error',
+        error: e.message || String(e),
+      });
+    }
   }
 
   return summary;

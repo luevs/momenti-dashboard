@@ -231,7 +231,7 @@ export default function Maquinas() {
           machineId: record.machine_id,
           meters: deltaMeters,
           operator: record.registered_by,
-          productionRecordId: record.id,
+          productionRecordId: (typeof record?.id === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(record.id)) ? record.id : null,
           productionDate: record.date,
         });
       } catch (consumeError) {
@@ -276,7 +276,7 @@ export default function Maquinas() {
               machineId: record.machine_id,
               meters: record.meters_printed,
               operator: record.registered_by,
-              productionRecordId: record.id,
+              productionRecordId: (typeof record?.id === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(record.id)) ? record.id : null,
               productionDate: record.date,
             });
           } catch (consumeError) {

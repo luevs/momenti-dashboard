@@ -1312,7 +1312,7 @@ export default function Insumos() {
                       machineId: maquina.id,
                       meters: metrosValue,
                       operator: corteOperador,
-                      productionRecordId: corteRegistrado?.id,
+                      productionRecordId: (typeof corteRegistrado?.id === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(corteRegistrado.id)) ? corteRegistrado.id : null,
                       productionDate: corteFecha,
                     });
                   } catch (autoError) {

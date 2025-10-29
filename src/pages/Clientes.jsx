@@ -124,20 +124,20 @@ export default function Clientes() {
       razon_social: newName.trim(),
       alias: newName.trim(),
       tipo_cliente: newType,
-  celular: newPhone || null,
+      celular: newPhone || null,
     });
 
     try {
+      const payload = {
+        razon_social: newName.trim(),
+        alias: newName.trim(),
+        tipo_cliente: newType,
+        celular: newPhone || null
+      };
+
       const { data, error } = await supabase
         .from("customers_")
-        .insert([
-          {
-            razon_social: newName.trim(),
-            alias: newName.trim(),
-            tipo_cliente: newType,
-            celular: newPhone || null,
-          }
-        ])
+        .insert([payload])
         .select()
         .single();
 
@@ -155,8 +155,8 @@ export default function Clientes() {
       const newCustomer = {
         id: data.id,
         name: data.razon_social,
-  phone: data.celular || "",
-        email: data.email || "",
+        phone: data.celular || "",
+        email: data.email || ""
       };
 
       setCustomers(prev => [newCustomer, ...prev]);

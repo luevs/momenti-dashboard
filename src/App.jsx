@@ -16,6 +16,9 @@ import MaquinaDetalle from "./pages/MaquinaDetalle";
 import Corte from "./pages/Corte.jsx";
 import Usuarios from "./pages/Usuarios";
 
+// Página principal del módulo de Caja
+import CajaPage from "./pages/Caja/CajaPage.jsx";
+
 // NUEVOS: pages de Clientes (asegúrate que existan los archivos)
 import Clientes from "./pages/Clientes";
 import ClienteDetalle from "./pages/ClienteDetalle";
@@ -116,11 +119,20 @@ function App() {
           </PrivateRoute>
         } />
 
-        <Route path="/corte" element={
+        {/* RUTAS DEL MÓDULO DE CAJA */}
+        <Route path="/caja" element={
           <PrivateRoute>
-            <Layout><Corte /></Layout>
+            <Layout><CajaPage /></Layout>
           </PrivateRoute>
         } />
+        <Route path="/caja/*" element={
+          <PrivateRoute>
+            <Layout><CajaPage /></Layout>
+          </PrivateRoute>
+        } />
+        
+        {/* Redirect de ruta legacy de corte a la nueva ubicación */}
+        <Route path="/corte" element={<Navigate to="/caja/cortes" replace />} />
 
         <Route path="/usuarios" element={
           <PrivateRoute>
