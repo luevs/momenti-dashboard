@@ -30,15 +30,23 @@ export const cajaService = {
   },
 
   async createMovimiento(movimiento) {
+    const usuario = (await supabase.auth.getUser()).data.user;
+    const payload = {
+      ...movimiento,
+      usuario_id: usuario?.id
+    };
+
     const { data, error } = await supabase
       .from('movimientos_caja')
-      .insert({
-        ...movimiento,
-        usuario_id: (await supabase.auth.getUser()).data.user?.id
-      })
+      .insert(payload)
       .select('*, categoria:categorias_caja(nombre)');
-    
-    if (error) throw error;
+
+    if (error) {
+      // Log para debugging
+      console.error('cajaService.createMovimiento error:', error);
+      console.error('cajaService.createMovimiento payload:', payload);
+      throw error;
+    }
     return data[0];
   },
 

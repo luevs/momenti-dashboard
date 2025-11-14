@@ -366,7 +366,61 @@ export default function ClientesLealtad() {
         throw err;
       }
 
-  // 3) Preparar datos para modal Post-Pedido
+      // --- Verificación adicional: comprobar suma total de metros consumidos ---
+      try {
+        // Obtener suma de meters_consumed en ambas tablas (orders + order_history) para este programa
+        const programId = selectedProgramId;
+        const customerId = selectedCustomerForMeters?.id;
+
+        // traer consumos desde orders
+        const { data: ordersForSum } = await supabase
+          .from('orders')
+          .select('meters_consumed')
+          .eq('program_id', programId)
+          .eq('customer_id', customerId);
+
+        // traer consumos desde order_history
+        const { data: historyForSum } = await supabase
+          .from('order_history')
+          .select('meters_consumed')
+          .eq('program_id', programId)
+          .eq('customer_id', customerId);
+
+        const totalConsumedFromOrders = (ordersForSum || []).reduce((s, r) => s + Number(r?.meters_consumed || 0), 0);
+        const totalConsumedFromHistory = (historyForSum || []).reduce((s, r) => s + Number(r?.meters_consumed || 0), 0);
+        const totalConsumed = Number((totalConsumedFromOrders + totalConsumedFromHistory).toFixed(2));
+
+        console.log('Verificación metros - programId:', programId, 'customerId:', customerId, {
+          totalConsumedFromOrders,
+          totalConsumedFromHistory,
+          totalConsumed,
+          selectedProgramTotal: selectedProgram.total_meters
+        });
+
+        const expectedRemaining = Number((Number(selectedProgram.total_meters || 0) - totalConsumed).toFixed(2));
+        const normalizedExpectedRemaining = expectedRemaining <= 0 ? 0 : expectedRemaining;
+
+        // Si la suma histórica alcanza o excede el total, forzar remaining 0
+        if (Math.abs(normalizedExpectedRemaining - newRemainingMeters) > 0.001) {
+          console.log('Ajustando remaining_meters a partir de suma histórica:', normalizedExpectedRemaining, ' (antes: ', newRemainingMeters, ')');
+          const { error: adjustError } = await supabase
+            .from('loyalty_programs')
+            .update({ remaining_meters: normalizedExpectedRemaining, status: normalizedExpectedRemaining <= 0 ? 'completado' : selectedProgram.status, updated_at: new Date().toISOString() })
+            .eq('id', selectedProgramId);
+
+          if (adjustError) {
+            console.error('Error ajustando remaining_meters según suma histórica:', adjustError);
+            // no bloqueamos el flujo principal, pero avisamos
+            alert('Advertencia: no se pudo ajustar automáticamente metros restantes en la base de datos. Revisa la consola.');
+          }
+        } else {
+          console.log('Remaining coincide con suma histórica. No hay ajuste necesario.');
+        }
+      } catch (verifyErr) {
+        console.error('Error durante verificación de suma de metros:', verifyErr);
+      }
+
+      // 3) Preparar datos para modal Post-Pedido
   // Usar folio de 3 dígitos consistente para tickets
   const generatedFolio = generateRandomFolio3();
   const programFolio = selectedProgram.program_folio || String(generatedFolio);
@@ -694,7 +748,11 @@ export default function ClientesLealtad() {
         };
       }
       
-      if (program.status === 'activo') {
+      // MODIFICADO: Considerar activo si tiene saldo restante > 0, independientemente del status
+      const hasRemaining = (parseFloat(program.remaining_meters) || 0) > 0;
+      const isActive = program.status === 'activo' || hasRemaining;
+      
+      if (isActive) {
         acc[program.type].active.push(program);
       } else {
         acc[program.type].historical.push(program);
@@ -707,7 +765,11 @@ export default function ClientesLealtad() {
   // Función auxiliar para calcular metros activos totales
   const calculateTotalActiveMeters = (programs) => {
     return programs
-      .filter(p => p.status === 'activo')
+      .filter(p => {
+        // MODIFICADO: Considerar activo si tiene saldo restante > 0, independientemente del status
+        const hasRemaining = (parseFloat(p.remaining_meters) || 0) > 0;
+        return p.status === 'activo' || hasRemaining;
+      })
       .reduce((sum, p) => sum + (p.remaining_meters || 0), 0);
   };
 
@@ -1273,6 +1335,7 @@ export default function ClientesLealtad() {
       totalActiveRemaining: 0,
       totalActiveMeters: 0,
       consumedActive: 0,
+      totalConsumedFromHistory: 0, // NUEVO: total consumido desde historial real
       completedCount: 0,
       lastCompletedDate: null,
       totalTrackedFolios: 0
@@ -1285,23 +1348,43 @@ export default function ClientesLealtad() {
       return (programType || '').toLowerCase() === normalizedType;
     };
 
+    // NUEVO: Calcular metros consumidos desde el historial real de pedidos
+    if (history.length) {
+      stats.totalConsumedFromHistory = history
+        .filter(record => typeMatches(record.type))
+        .reduce((total, record) => {
+          const consumed = parseFloat(record.meters_consumed) || 0;
+          return total + consumed;
+        }, 0);
+    }
+
     if (client?.programs) {
       const activePrograms = [];
       const historicalPrograms = [];
+      const programsWithRemaining = []; // NUEVO: programas con saldo restante
 
       Object.values(client.programs).forEach(({ active = [], historical = [] }) => {
         const filteredActive = active.filter(program => typeMatches(program.type));
         const filteredHistorical = historical.filter(program => typeMatches(program.type));
         activePrograms.push(...filteredActive);
         historicalPrograms.push(...filteredHistorical);
+        
+        // NUEVO: Incluir TODOS los programas con saldo restante > 0
+        [...filteredActive, ...filteredHistorical].forEach(program => {
+          const remaining = parseFloat(program.remaining_meters) || 0;
+          if (remaining > 0) {
+            programsWithRemaining.push(program);
+          }
+        });
       });
 
       stats.activeCount = activePrograms.length;
 
-      if (activePrograms.length) {
+      // MODIFICADO: Usar programsWithRemaining para calcular saldo activo real
+      if (programsWithRemaining.length > 0) {
         const breakdown = {};
 
-        activePrograms.forEach(program => {
+        programsWithRemaining.forEach(program => {
           const remaining = parseFloat(program.remaining_meters) || 0;
           const total = parseFloat(program.total_meters) || 0;
           stats.totalActiveRemaining += remaining;
@@ -1310,10 +1393,16 @@ export default function ClientesLealtad() {
           breakdown[typeLabel] = (breakdown[typeLabel] || 0) + 1;
         });
 
-        stats.consumedActive = Math.max(stats.totalActiveMeters - stats.totalActiveRemaining, 0);
+        // MODIFICADO: usar el historial real en lugar del cálculo basado en programas activos solamente
+        const consumedFromActivePrograms = Math.max(stats.totalActiveMeters - stats.totalActiveRemaining, 0);
+        stats.consumedActive = Math.max(stats.totalConsumedFromHistory, consumedFromActivePrograms);
+        
         stats.activeBreakdown = Object.entries(breakdown)
           .map(([type, count]) => `${type}: ${count}`)
           .join(' • ');
+      } else {
+        // Si no hay programas con saldo, usar el total del historial
+        stats.consumedActive = stats.totalConsumedFromHistory;
       }
 
       const completedPrograms = [

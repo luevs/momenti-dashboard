@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../supabaseClient.js';
 import { cajaService } from '../services/cajaService.js';
 
 export const useCaja = () => {
@@ -104,7 +105,12 @@ export const useCaja = () => {
   // ===== CATEGORIAS =====
   const cargarCategorias = useCallback(async (tipo = null) => {
     try {
+      // Log user session to help debug RLS / permisos
+      const authUser = await supabase.auth.getUser();
+      console.log('useCaja: supabase user:', authUser?.data?.user);
+
       const data = await cajaService.getCategorias(tipo);
+      console.log('useCaja: cargarCategorias result:', data); // DEBUG
       setCategorias(data);
     } catch (err) {
       setError('Error al cargar categorías: ' + err.message);

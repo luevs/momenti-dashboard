@@ -64,7 +64,7 @@ export default function Clientes() {
 
         const { data, error } = await supabase
           .from("customers_")
-          .select("id, alias, razon_social, celular, email");
+          .select("id, codigo_cliente, alias, razon_social, celular, email");
         
         console.log("📊 Respuesta de Supabase:", { data, error });
         
@@ -83,6 +83,7 @@ export default function Clientes() {
             console.log("🔄 Procesando cliente:", c);
             return {
               id: c.id,
+              codigo_cliente: c.codigo_cliente,
               name: c.razon_social || c.alias || "Sin nombre",
               phone: c.celular || "",
               email: c.email || "",
@@ -154,6 +155,7 @@ export default function Clientes() {
       // Agregar al estado local
       const newCustomer = {
         id: data.id,
+        codigo_cliente: data.codigo_cliente,
         name: data.razon_social,
         phone: data.celular || "",
         email: data.email || ""

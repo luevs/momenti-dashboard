@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, DollarSign, Calendar, Tag, CreditCard, FileText, Plus, Minus } from 'lucide-react';
 import { useCaja } from '../../hooks/useCaja.js';
+import { supabase } from '../../supabaseClient.js';
 
 const RegistroMovimiento = ({ isOpen, onClose, movimientoEdit = null }) => {
   const { categorias, agregarMovimiento, actualizarMovimiento, loading, cajaService } = useCaja();
@@ -93,15 +94,24 @@ const RegistroMovimiento = ({ isOpen, onClose, movimientoEdit = null }) => {
     e.preventDefault();
     
     if (!validateForm()) return;
-
+    // Verificar que el usuario esté autenticado (evitar violación RLS)
+    const authRes = await supabase.auth.getUser();
+    const currentUser = authRes?.data?.user;
+    if (!currentUser) {
+      try { window.alert('Debes iniciar sesión para registrar movimientos.'); } catch(e) {}
+      return;
+    }
     try {
       setSubmitting(true);
-      
+
       const movimientoData = {
         ...formData,
         monto: parseFloat(formData.monto),
         fecha: new Date(formData.fecha).toISOString()
       };
+
+      // Debug: log what vamos a enviar
+      console.log('RegistroMovimiento: enviar movimientoData ->', movimientoData);
 
       if (movimientoEdit) {
         await actualizarMovimiento(movimientoEdit.id, movimientoData);
@@ -112,6 +122,11 @@ const RegistroMovimiento = ({ isOpen, onClose, movimientoEdit = null }) => {
       onClose();
     } catch (error) {
       console.error('Error al guardar movimiento:', error);
+      // Mostrar detalle si viene de supabase
+      if (error?.response) console.error('Response:', error.response);
+      if (error?.status) console.error('Status:', error.status);
+      // También mostrar un alert corto para que el usuario vea algo en UI
+      try { window.alert('Error al guardar movimiento: ' + (error.message || JSON.stringify(error))); } catch(e) {}
     } finally {
       setSubmitting(false);
     }
