@@ -1,0 +1,232 @@
+# INSTRUCTIVO: BACKUP DE SUPABASE Y MIGRACIÓN DE IDs
+
+## 📋 PASO 1: HACER BACKUP COMPLETO
+
+### Opción A: Backup desde Supabase Dashboard (RECOMENDADO)
+1. Ve a tu proyecto de Supabase (https://supabase.com/dashboard)
+2. Ve a **Database** → **Backups**
+3. Haz clic en **Create backup now**
+4. Espera a que termine (aparecerá en la lista)
+5. **Descarga el backup** haciendo clic en el ícono de descarga
+
+### Opción B: Backup con PostgreSQL (si tienes acceso directo)
+```bash
+# Abrir PowerShell como administrador
+# Reemplaza los valores con tu información de Supabase
+
+# Obtener string de conexión de Supabase:
+# Ve a Settings → Database → Connection string → Postgres
+
+pg_dump "postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres" > backup_momenti_$(Get-Date -Format "yyyyMMdd_HHmmss").sql
+
+# Ejemplo:
+pg_dump "postgresql://postgres:tu_password@db.xyz.supabase.co:5432/postgres" > backup_momenti_20251115_143000.sql
+```
+
+### Opción C: Backup de tablas específicas (MÁS RÁPIDO)
+```bash
+# Solo las tablas críticas para la migración
+pg_dump "postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres" -t customers_ -t loyalty_programs -t order_history > backup_migration_tables.sql
+```
+
+## 📋 PASO 2: VERIFICAR DATOS ANTES DE MIGRAR
+
+### En Supabase SQL Editor, ejecuta:
+```sql
+-- Ver cuántos clientes tienes
+SELECT COUNT(*) as total_customers FROM customers_;
+
+-- Ver clientes con IDs largos
+SELECT id, LENGTH(id::text) as id_length, razon_social 
+FROM customers_ 
+WHERE LENGTH(id::text) > 3 
+ORDER BY id_length DESC 
+LIMIT 10;
+
+-- Ver relaciones que se van a actualizar
+SELECT 
+    (SELECT COUNT(*) FROM customers_) as customers_total,
+    (SELECT COUNT(*) FROM loyalty_programs) as loyalty_programs_total,
+    (SELECT COUNT(*) FROM order_history) as order_history_total;
+```
+
+## 📋 PASO 3: EJECUTAR MIGRACIÓN (PASO A PASO)
+
+### 3.1 Primero, ejecuta solo la función
+```sql
+-- Solo crear la función (sin migrar aún)
+CREATE OR REPLACE FUNCTION generate_3digit_id() 
+RETURNS INTEGER AS $$
+DECLARE
+    new_id INTEGER;
+    max_attempts INTEGER := 1000;
+    attempts INTEGER := 0;
+BEGIN
+    LOOP
+        new_id := floor(random() * 900 + 100)::INTEGER;
+        IF NOT EXISTS (SELECT 1 FROM customers_ WHERE id::INTEGER = new_id) THEN
+            RETURN new_id;
+        END IF;
+        attempts := attempts + 1;
+        IF attempts >= max_attempts THEN
+            RAISE EXCEPTION 'No se pudo generar un ID único después de % intentos', max_attempts;
+        END IF;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### 3.2 Crear tabla de mapeo
+```sql
+CREATE TABLE IF NOT EXISTS id_migration_map (
+    old_id VARCHAR,
+    new_id INTEGER,
+    customer_name VARCHAR,
+    migrated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### 3.3 PROBAR con UN SOLO cliente primero
+```sql
+-- Migrar SOLO UN cliente para probar
+DO $$
+DECLARE
+    customer_record RECORD;
+    new_customer_id INTEGER;
+BEGIN
+    -- Tomar solo el primer cliente con ID largo
+    SELECT id, razon_social, alias 
+    INTO customer_record
+    FROM customers_ 
+    WHERE LENGTH(id::text) > 3
+    ORDER BY razon_social
+    LIMIT 1;
+    
+    IF customer_record.id IS NOT NULL THEN
+        -- Generar nuevo ID
+        new_customer_id := generate_3digit_id();
+        
+        -- Guardar mapeo
+        INSERT INTO id_migration_map (old_id, new_id, customer_name)
+        VALUES (customer_record.id, new_customer_id, 
+                COALESCE(customer_record.razon_social, customer_record.alias));
+        
+        -- Actualizar tablas (EN ORDEN)
+        UPDATE order_history 
+        SET customer_id = new_customer_id::text
+        WHERE customer_id = customer_record.id;
+        
+        UPDATE loyalty_programs 
+        SET customer_id = new_customer_id::text
+        WHERE customer_id = customer_record.id;
+        
+        UPDATE customers_ 
+        SET id = new_customer_id::text
+        WHERE id = customer_record.id;
+        
+        RAISE NOTICE 'MIGRADO: % (ID: % -> %)', 
+                     COALESCE(customer_record.razon_social, customer_record.alias),
+                     customer_record.id, 
+                     new_customer_id;
+    END IF;
+END $$;
+```
+
+### 3.4 Verificar que funcionó
+```sql
+-- Ver el resultado de la prueba
+SELECT * FROM id_migration_map;
+
+-- Verificar que las relaciones funcionan
+SELECT 
+    c.id as customer_id,
+    c.razon_social,
+    COUNT(lp.id) as programas,
+    COUNT(oh.id) as ordenes
+FROM customers_ c
+LEFT JOIN loyalty_programs lp ON c.id = lp.customer_id
+LEFT JOIN order_history oh ON c.id = oh.customer_id
+WHERE c.id IN (SELECT new_id::text FROM id_migration_map)
+GROUP BY c.id, c.razon_social;
+```
+
+### 3.5 Si la prueba funcionó, migrar TODOS
+```sql
+-- EJECUTAR EL SCRIPT COMPLETO (solo si la prueba fue exitosa)
+-- Copia y pega todo el bloque DO $$ del archivo migrar_ids_3_digitos.sql
+```
+
+## 📋 PASO 4: VERIFICAR MIGRACIÓN COMPLETA
+
+```sql
+-- Verificar que todos los IDs son de 3 dígitos
+SELECT 
+    COUNT(*) as total_customers,
+    COUNT(CASE WHEN LENGTH(id) = 3 THEN 1 END) as ids_3_digitos,
+    COUNT(CASE WHEN LENGTH(id) > 3 THEN 1 END) as ids_largos
+FROM customers_;
+
+-- Ver mapeo completo
+SELECT COUNT(*) as clientes_migrados FROM id_migration_map;
+
+-- Verificar integridad de datos
+SELECT 
+    'customers_' as tabla,
+    COUNT(*) as registros
+FROM customers_
+WHERE LENGTH(id) <= 3
+UNION ALL
+SELECT 
+    'loyalty_programs con relación válida' as tabla,
+    COUNT(*) as registros
+FROM loyalty_programs lp
+JOIN customers_ c ON lp.customer_id = c.id;
+```
+
+## 📋 PASO 5: ACTUALIZAR CONTRASEÑAS
+
+```sql
+-- Ejecutar el script de contraseñas
+-- (usar el archivo cliente_passwords.sql)
+ALTER TABLE customers_ ADD COLUMN IF NOT EXISTS client_password VARCHAR(50);
+
+UPDATE customers_ 
+SET client_password = substr(md5(random()::text), 1, 8)
+WHERE client_password IS NULL OR client_password = '';
+```
+
+## 📋 PASO 6: OBTENER LISTA FINAL
+
+```sql
+-- Ejecutar clientes_credenciales.sql para obtener la lista completa
+-- de clientes con sus nuevos IDs y contraseñas
+```
+
+## ⚠️ IMPORTANTE:
+
+1. **HACER BACKUP ANTES de cualquier cambio**
+2. **PROBAR con 1 cliente** antes de migrar todos
+3. **NO cerrar la ventana** de Supabase durante la migración
+4. **Verificar cada paso** antes de continuar
+5. **Tener el backup listo** para restaurar si algo sale mal
+
+## 🆘 EN CASO DE ERROR:
+
+### Si algo sale mal, restaurar backup:
+```bash
+# Desde PowerShell (usando tu backup)
+psql "postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres" < backup_momenti_20251115_143000.sql
+```
+
+### O desde Supabase Dashboard:
+1. Ve a **Database** → **Backups**
+2. Busca tu backup
+3. Haz clic en **Restore**
+
+---
+
+## 📞 CONTACTO:
+Si algo no funciona, comparte:
+1. El mensaje de error exacto
+2. En qué paso ocurrió
+3. Cuántos registros se procesaron antes del error

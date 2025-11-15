@@ -64,7 +64,7 @@ export default function Clientes() {
 
         const { data, error } = await supabase
           .from("customers_")
-          .select("id, codigo_cliente, alias, razon_social, celular, email");
+          .select("id, alias, razon_social, celular, email, direccion");
         
         console.log("📊 Respuesta de Supabase:", { data, error });
         
@@ -79,14 +79,19 @@ export default function Clientes() {
           console.log("✅ Datos cargados exitosamente:", data);
           console.log("📈 Cantidad de clientes encontrados:", data?.length || 0);
           
+          if (!data || data.length === 0) {
+            console.warn("⚠️ La tabla customers_ está vacía o no hay datos");
+            console.warn("🔍 Verifica que tengas clientes en la tabla customers_ en Supabase");
+          }
+          
           const formattedCustomers = (data || []).map(c => {
             console.log("🔄 Procesando cliente:", c);
             return {
               id: c.id,
-              codigo_cliente: c.codigo_cliente,
               name: c.razon_social || c.alias || "Sin nombre",
               phone: c.celular || "",
               email: c.email || "",
+              address: c.direccion || "",
               status: "active", // Default status since column doesn't exist
             };
           });
@@ -155,10 +160,10 @@ export default function Clientes() {
       // Agregar al estado local
       const newCustomer = {
         id: data.id,
-        codigo_cliente: data.codigo_cliente,
         name: data.razon_social,
         phone: data.celular || "",
-        email: data.email || ""
+        email: data.email || "",
+        address: data.direccion || ""
       };
 
       setCustomers(prev => [newCustomer, ...prev]);
