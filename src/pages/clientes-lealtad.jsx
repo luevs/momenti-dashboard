@@ -658,71 +658,37 @@ export default function ClientesLealtad() {
   const fetchCustomersWithPrograms = async () => {
     setIsLoading(true);
     try {
-      // 1. Obtener SOLO los clientes que tienen programas de lealtad
-      const { data: rawData, error } = await supabase
+      // 1. OBTENER PROGRAMAS DIRECTAMENTE DE loyalty_programs
+      const { data: programsData, error: programsError } = await supabase
+        .from('loyalty_programs')
+        .select('*');
+
+      if (programsError) {
+        console.error("Error al obtener programas:", programsError);
+        setCustomersWithPrograms([]);
+        return;
+      }
+
+      // 2. OBTENER CLIENTES que tienen esos programas
+      const customerIds = [...new Set(programsData.map(p => p.customer_id))];
+      const { data: customersData, error: customersError } = await supabase
         .from('customers_')
-        .select(`
-          id, razon_social, alias, celular, email, direccion,
-          loyalty_programs (
-            id, type, program_number, program_folio, total_meters, remaining_meters,
-            status, purchase_date, completion_date, numero_wpp,
-            edit_reason, edit_authorized_by, created_at
-          )
-        `)
-        .not('loyalty_programs', 'is', null); // Solo clientes con programas
+        .select('*')
+        .in('id', customerIds);
 
-      if (error) {
-        console.error("Error al obtener clientes:", error);
+      if (customersError) {
+        console.error("Error al obtener clientes:", customersError);
         setCustomersWithPrograms([]);
         return;
       }
 
-      console.log("Datos recibidos de Supabase:", rawData?.length || 0, "clientes");
-      console.log("Primera muestra de datos:", rawData?.[0]);
-
-      if (!rawData || rawData.length === 0) {
-        console.log("No se encontraron clientes con programas de lealtad");
-        setCustomersWithPrograms([]);
-        return;
-      }
-
-      // Filtrar clientes que realmente tienen programas (por seguridad extra)
-      const clientsWithPrograms = rawData.filter(customer => 
-        customer.loyalty_programs && customer.loyalty_programs.length > 0
-      );
-
-      console.log("Clientes filtrados con programas:", clientsWithPrograms.length);
-
-      // 2. Obtener los últimos registros solo por customer_id usando .in (más eficiente y seguro)
-      const customerIds = clientsWithPrograms.map(c => c.id).filter(Boolean);
-      let lastRegistries = [];
-
-      if (customerIds.length > 0) {
-        const { data: registryData, error: registryError } = await supabase
-          .from('order_history')
-          .select('customer_id, recorded_at, client_name')
-          .in('customer_id', customerIds)
-          .order('recorded_at', { ascending: false });
-
-        if (registryError) {
-          console.warn('No se pudo obtener registros por customer_id:', registryError);
-        } else {
-          lastRegistries = registryData || [];
-        }
-      }
-
-      // Build lookup for latest recorded_at per customer_id
-      const lastRegistryByCustomer = {};
-      lastRegistries.forEach(reg => {
-        if (reg.customer_id && !lastRegistryByCustomer[reg.customer_id]) {
-          lastRegistryByCustomer[reg.customer_id] = reg.recorded_at;
-        }
-      });
-
-      // 3. Transformar datos a estructura agrupada (sin hacer queries adicionales por nombre)
-      const transformedData = clientsWithPrograms.map(customer => {
-        const groupedPrograms = groupProgramsByType(customer.loyalty_programs || []);
-
+      console.log("Programas encontrados:", programsData?.length || 0);
+      console.log("Clientes encontrados:", customersData?.length || 0);
+      // 3. COMBINAR CLIENTES CON SUS PROGRAMAS
+      const customersWithProgramsData = customersData.map(customer => {
+        const customerPrograms = programsData.filter(p => p.customer_id === customer.id);
+        const groupedPrograms = groupProgramsByType(customerPrograms);
+        
         return {
           id: customer.id,
           razon_social: customer.razon_social,
@@ -730,18 +696,18 @@ export default function ClientesLealtad() {
           celular: customer.celular,
           email: customer.email,
           direccion: customer.direccion,
-          programs: groupedPrograms,
-          totalActiveMeters: calculateTotalActiveMeters(customer.loyalty_programs || []),
-          totalPrograms: customer.loyalty_programs?.length || 0,
-          activePrograms: (customer.loyalty_programs || []).filter(p => p.status === 'activo').length,
-          lastMetersRegistry: lastRegistryByCustomer[customer.id] || null
+          name: customer.razon_social,
+          programs: groupedPrograms, // ¡USAR GROUPED PROGRAMS!
+          groupedPrograms,
+          totalActiveMeters: calculateTotalActiveMeters(customerPrograms),
+          totalPrograms: customerPrograms.length,
+          activePrograms: customerPrograms.filter(p => p.status === 'activo').length,
         };
       });
 
-      // 4. Ordenar por metros activos (clientes más activos primero)
-      transformedData.sort((a, b) => b.totalActiveMeters - a.totalActiveMeters);
-
-      setCustomersWithPrograms(transformedData);
+      console.log("✅ Clientes procesados:", customersWithProgramsData.length);
+      console.log("🔍 Ejemplo de cliente procesado:", customersWithProgramsData[0]);
+      setCustomersWithPrograms(customersWithProgramsData);
     } catch (error) {
       console.error("Error inesperado:", error);
       setCustomersWithPrograms([]);
