@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText, SlidersHorizontal, LayoutGrid, Table2, Users, Sparkles, Ruler, Search } from "lucide-react";
+import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText, SlidersHorizontal, LayoutGrid, Table2, Users, Sparkles, Ruler, Search, Key } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import useCurrentUser from '../utils/useCurrentUser';
 import { generateTicketHTML } from '../utils/ticketUtils';
 import { getNextProgramFolio, generateRandomFolio3 } from '../utils/folioUtils';
+import ClienteCredentialsManager from '../components/ClienteCredentialsManager';
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import SignatureCanvas from "react-signature-canvas";
@@ -657,7 +658,7 @@ export default function ClientesLealtad() {
   const fetchCustomersWithPrograms = async () => {
     setIsLoading(true);
     try {
-      // 1. Obtener todos los clientes con sus programas (solo clientes con programas)
+      // 1. Obtener SOLO los clientes que tienen programas de lealtad
       const { data: rawData, error } = await supabase
         .from('customers_')
         .select(`
@@ -668,7 +669,7 @@ export default function ClientesLealtad() {
             edit_reason, edit_authorized_by, created_at
           )
         `)
-        .not('loyalty_programs.id', 'is', null);
+        .not('loyalty_programs', 'is', null); // Solo clientes con programas
 
       if (error) {
         console.error("Error al obtener clientes:", error);
@@ -676,13 +677,24 @@ export default function ClientesLealtad() {
         return;
       }
 
+      console.log("Datos recibidos de Supabase:", rawData?.length || 0, "clientes");
+      console.log("Primera muestra de datos:", rawData?.[0]);
+
       if (!rawData || rawData.length === 0) {
+        console.log("No se encontraron clientes con programas de lealtad");
         setCustomersWithPrograms([]);
         return;
       }
 
+      // Filtrar clientes que realmente tienen programas (por seguridad extra)
+      const clientsWithPrograms = rawData.filter(customer => 
+        customer.loyalty_programs && customer.loyalty_programs.length > 0
+      );
+
+      console.log("Clientes filtrados con programas:", clientsWithPrograms.length);
+
       // 2. Obtener los últimos registros solo por customer_id usando .in (más eficiente y seguro)
-      const customerIds = rawData.map(c => c.id).filter(Boolean);
+      const customerIds = clientsWithPrograms.map(c => c.id).filter(Boolean);
       let lastRegistries = [];
 
       if (customerIds.length > 0) {
@@ -708,7 +720,7 @@ export default function ClientesLealtad() {
       });
 
       // 3. Transformar datos a estructura agrupada (sin hacer queries adicionales por nombre)
-      const transformedData = rawData.map(customer => {
+      const transformedData = clientsWithPrograms.map(customer => {
         const groupedPrograms = groupProgramsByType(customer.loyalty_programs || []);
 
         return {
@@ -1933,6 +1945,14 @@ export default function ClientesLealtad() {
               <History className="text-purple-600" size={24} />
               Historial de {selectedClient?.name || selectedClient?.razon_social || selectedClient?.alias || ''}
             </h2>
+
+            {/* Gestión de credenciales de cliente */}
+            <div className="mb-6">
+              <ClienteCredentialsManager 
+                customer={selectedClient} 
+                onUpdate={() => fetchCustomersWithPrograms()}
+              />
+            </div>
 
             {isLoadingHistory ? (
               <p className="text-center text-gray-500 py-8">Cargando historial...</p>

@@ -23,6 +23,10 @@ import CajaPage from "./pages/Caja/CajaPage.jsx";
 import Clientes from "./pages/Clientes";
 import ClienteDetalle from "./pages/ClienteDetalle";
 
+// NUEVOS: Dashboard para clientes
+import ClienteLogin from "./pages/ClienteLogin";
+import ClienteDashboard from "./pages/ClienteDashboard";
+
 // Página de OCR para trabajos de impresión
 import TrabajoOCR from "./pages/TrabajoOCR";
 
@@ -76,6 +80,10 @@ function App() {
       <Routes>
         {/* Ruta pública */}
         <Route path="/login" element={<Login />} />
+
+        {/* Rutas públicas para clientes */}
+        <Route path="/cliente/login" element={<ClienteLogin />} />
+        <Route path="/cliente/dashboard" element={<ClienteDashboard />} />
 
         {/* Rutas protegidas */}
         <Route path="/" element={

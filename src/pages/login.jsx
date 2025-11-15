@@ -138,7 +138,6 @@ export default function Login() {
         </form>
 
         <div className="mt-4 text-xs text-gray-500">
-          Consejo: por ahora el login usa la tabla <span className="font-mono">users_admin</span> si existe. Si no existe, funciona el credencial local <span className="font-mono">admin / momenti2023</span> para desarrollo.
         </div>
       </div>
     </div>
