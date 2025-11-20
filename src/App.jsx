@@ -27,6 +27,9 @@ import ClienteDetalle from "./pages/ClienteDetalle";
 import ClienteLogin from "./pages/ClienteLogin";
 import ClienteDashboard from "./pages/ClienteDashboard";
 
+// Componente de monitoreo de sesiones
+import MonitoringPanel from "./components/MonitoringPanel";
+
 // Página de OCR para trabajos de impresión
 import TrabajoOCR from "./pages/TrabajoOCR";
 
@@ -114,6 +117,11 @@ function App() {
         <Route path="/configuracion" element={
           <PrivateRoute>
             <Layout><Configuracion /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/monitor" element={
+          <PrivateRoute>
+            <Layout><MonitoringPanel /></Layout>
           </PrivateRoute>
         } />
         <Route path="/clientes-lealtad" element={

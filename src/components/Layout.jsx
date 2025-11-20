@@ -41,6 +41,7 @@ export default function Layout({ children }) {
       ]
     },
     ...( (currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin')) || isAdmin() ? [
+      { path: '/monitor', label: '🔍 Monitor Sesiones', icon: BarChart2 },
       { path: '/configuracion', label: 'Configuración', icon: Settings },
       { path: '/usuarios', label: 'Usuarios', icon: Users },
     ] : []),

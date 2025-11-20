@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogIn } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { useAuthWithLogging } from '../utils/useAuthWithLogging';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -9,6 +10,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { loginAdmin, logAccess } = useAuthWithLogging();
 
   // Credenciales temporales de fallback (solo desarrollo)
   const VALID_USERNAME = 'admin';
@@ -20,32 +22,45 @@ export default function Login() {
     setLoading(true);
 
     try {
-      // 1) Intentar autenticación vía Supabase Auth (email/password)
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({ email: username, password });
-        if (!error && data?.session) {
-          // session established
-          // Optionally save currentUser in localStorage for compatibility
-          const user = data.session.user;
-          try {
-            localStorage.setItem('currentUser', JSON.stringify({ id: user.id, email: user.email, name: user.user_metadata?.name || user.email }));
-            localStorage.setItem('isAuthenticated', 'true');
-          } catch(e) {}
-          navigate('/');
-          return;
+      // 1) Intentar autenticación con el sistema de logging
+      const { user, error: authError } = await loginAdmin(username, password);
+      
+      if (!authError && user) {
+        // Autenticación exitosa
+        try {
+          localStorage.setItem('currentUser', JSON.stringify({ 
+            id: user.id, 
+            email: user.email, 
+            name: user.user_metadata?.name || user.email 
+          }));
+          localStorage.setItem('isAuthenticated', 'true');
+        } catch(e) {
+          console.warn('Error saving to localStorage:', e);
         }
-      } catch (authErr) {
-        console.warn('Supabase auth signIn failed or not configured:', authErr);
+        navigate('/');
+        return;
       }
 
-      // 2) Intentamos autenticar con la función RPC 'check_user_password' que compara password_hash (fallback)
+      // 2) Fallback: Intentamos autenticar con la función RPC 'check_user_password'
       try {
-        const rpcRes = await supabase.rpc('check_user_password', { p_identifier: username, p_password: password });
+        const rpcRes = await supabase.rpc('check_user_password', { 
+          p_identifier: username, 
+          p_password: password 
+        });
+        
         if (!rpcRes.error && rpcRes.data) {
           const userRow = Array.isArray(rpcRes.data) ? rpcRes.data[0] : rpcRes.data;
           if (userRow && (userRow.username || userRow.email)) {
+            // Registrar el acceso manual para usuarios RPC
+            await logAccess('admin', userRow.username || userRow.email, userRow.full_name || userRow.username);
+            
             localStorage.setItem('isAuthenticated', 'true');
-            localStorage.setItem('currentUser', JSON.stringify({ id: userRow.id, username: userRow.username || userRow.email, role: userRow.role, name: userRow.full_name }));
+            localStorage.setItem('currentUser', JSON.stringify({ 
+              id: userRow.id, 
+              username: userRow.username || userRow.email, 
+              role: userRow.role, 
+              name: userRow.full_name 
+            }));
             navigate('/');
             return;
           }
@@ -60,8 +75,16 @@ export default function Login() {
 
       // 3) Fallback: credenciales de desarrollo local
       if (username === VALID_USERNAME && password === VALID_PASSWORD) {
+        // Registrar acceso local
+        await logAccess('admin', VALID_USERNAME, 'Local Admin');
+        
         localStorage.setItem('isAuthenticated', 'true');
-        localStorage.setItem('currentUser', JSON.stringify({ id: 'local-admin', username: VALID_USERNAME, role: 'admin', name: 'Local Admin' }));
+        localStorage.setItem('currentUser', JSON.stringify({ 
+          id: 'local-admin', 
+          username: VALID_USERNAME, 
+          role: 'admin', 
+          name: 'Local Admin' 
+        }));
         navigate('/');
         return;
       }

@@ -14,7 +14,9 @@ import {
   Receipt,
   Calculator,
   PieChart,
-  Tag
+  Tag,
+  Shield,
+  Activity
 } from "lucide-react";
 import { isAdmin } from '../utils/auth';
 
@@ -48,8 +50,10 @@ export default function Sidebar() {
     { path: "/trabajo-ocr", label: "Trabajos OCR", icon: FileImage },
     { path: "/clientes", label: "Clientes", icon: ClipboardList },
     { path: "/clientes-lealtad", label: "Clientes Lealtad", icon: Users },
+    // Monitoreo de seguridad solo para admins
+    ...(isAdmin() ? [{ path: "/monitor", label: "Monitor Sesiones", icon: Activity }] : []),
     // Usuarios only visible to admins
-    ...(isAdmin() ? [{ path: "/usuarios", label: "Usuarios", icon: Users }] : []),
+    ...(isAdmin() ? [{ path: "/usuarios", label: "Usuarios", icon: Shield }] : []),
   ];
 
   // Menú expandible de Caja
