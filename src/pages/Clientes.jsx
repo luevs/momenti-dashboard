@@ -64,7 +64,7 @@ export default function Clientes() {
 
         const { data, error } = await supabase
           .from("customers_")
-          .select("id, codigo_cliente, alias, razon_social, celular, email");
+          .select("id, razon_social, alias, celular, email, direccion");
         
         console.log("📊 Respuesta de Supabase:", { data, error });
         
@@ -83,10 +83,10 @@ export default function Clientes() {
             console.log("🔄 Procesando cliente:", c);
             return {
               id: c.id,
-              codigo_cliente: c.codigo_cliente,
               name: c.razon_social || c.alias || "Sin nombre",
               phone: c.celular || "",
               email: c.email || "",
+              address: c.direccion || "",
               status: "active", // Default status since column doesn't exist
             };
           });

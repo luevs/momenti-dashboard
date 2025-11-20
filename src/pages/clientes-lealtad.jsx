@@ -682,11 +682,53 @@ export default function ClientesLealtad() {
         return;
       }
 
+      // 3. OBTENER ORDER_HISTORY para recalcular metros consumidos por program_folio
+      const { data: orderHistoryData, error: historyError } = await supabase
+        .from('order_history')
+        .select('customer_id, program_folio, meters_consumed')
+        .in('customer_id', customerIds);
+
+      if (historyError) {
+        console.error("Error al obtener order_history:", historyError);
+      }
+
+      // 4. CALCULAR METROS CONSUMIDOS POR PROGRAM_FOLIO
+      const consumedByFolio = {};
+      if (orderHistoryData) {
+        orderHistoryData.forEach(order => {
+          const folio = order.program_folio;
+          const customerId = order.customer_id;
+          const consumed = parseFloat(order.meters_consumed) || 0;
+          
+          if (folio) {
+            const key = `${customerId}-${folio}`;
+            consumedByFolio[key] = (consumedByFolio[key] || 0) + consumed;
+          }
+        });
+      }
+
+      console.log("🔥 Metros consumidos por folio:", consumedByFolio);
       console.log("Programas encontrados:", programsData?.length || 0);
       console.log("Clientes encontrados:", customersData?.length || 0);
-      // 3. COMBINAR CLIENTES CON SUS PROGRAMAS
+      
+      // 5. COMBINAR CLIENTES CON SUS PROGRAMAS Y RECALCULAR METROS
       const customersWithProgramsData = customersData.map(customer => {
-        const customerPrograms = programsData.filter(p => p.customer_id === customer.id);
+        const customerPrograms = programsData.filter(p => p.customer_id === customer.id).map(program => {
+          // RECALCULAR remaining_meters basado en order_history
+          const folioKey = `${customer.id}-${program.program_folio}`;
+          const consumedFromHistory = consumedByFolio[folioKey] || 0;
+          const totalMeters = parseFloat(program.total_meters) || 0;
+          const recalculatedRemaining = Math.max(0, totalMeters - consumedFromHistory);
+          
+          console.log(`🔥 Programa ${program.program_folio}: total=${totalMeters}, consumido=${consumedFromHistory}, restante=${recalculatedRemaining}`);
+          
+          return {
+            ...program,
+            remaining_meters: recalculatedRemaining, // USAR EL VALOR RECALCULADO
+            consumed_from_history: consumedFromHistory // Para debugging
+          };
+        });
+        
         const groupedPrograms = groupProgramsByType(customerPrograms);
         
         return {
@@ -779,10 +821,11 @@ export default function ClientesLealtad() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showFilters]);
 
-  // Función para obtener historial de un cliente (opcionalmente filtrado por programa)
-  const getClientHistory = async (clientId, programId = null) => {
+  // Función para obtener historial de un cliente filtrado por program_folio
+  const getClientHistoryByFolio = async (clientId, programFolio = null) => {
     setIsLoadingHistory(true);
     try {
+      console.log('🔍 getClientHistoryByFolio called with:', { clientId, programFolio });
 
       // Buscar tanto por customer_id como client_id para compatibilidad con registros antiguos
       let query = supabase
@@ -790,23 +833,37 @@ export default function ClientesLealtad() {
         .select('*')
         .or(`customer_id.eq.${clientId},client_id.eq.${clientId}`);
 
-      if (programId) query = query.eq('program_id', programId);
+      // Filtrar por program_folio si se proporciona
+      if (programFolio) {
+        console.log('🔍 Filtering by program_folio:', programFolio);
+        query = query.eq('program_folio', programFolio);
+      }
 
       const { data, error } = await query.order('recorded_at', { ascending: false });
       
+      console.log('📊 Query result:', { data: data?.length, error, programFolio });
+      
       // Si no encuentra por ID, buscar por nombre como fallback
       if (!data || data.length === 0) {
+        console.log('🔄 Trying fallback search by name');
         const cliente = customersWithPrograms.find(c => c.id === clientId);
         const clientName = cliente?.razon_social || cliente?.name;
         
         if (clientName) {
-          const { data: nameData, error: nameError } = await supabase
+          let nameQuery = supabase
             .from('order_history')
             .select('*')
-            .eq('client_name', clientName)
-            .order('recorded_at', { ascending: false });
+            .eq('client_name', clientName);
+          
+          // Si hay filtro de folio, aplicarlo también
+          if (programFolio) {
+            nameQuery = nameQuery.eq('program_folio', programFolio);
+          }
+          
+          const { data: nameData, error: nameError } = await nameQuery.order('recorded_at', { ascending: false });
           
           if (!nameError && nameData && nameData.length > 0) {
+            console.log('✅ Found records by name:', nameData.length);
             setClientHistory(nameData);
             setIsLoadingHistory(false);
             return;
@@ -818,6 +875,7 @@ export default function ClientesLealtad() {
         console.error("Error al obtener historial:", error);
         setClientHistory([]);
       } else {
+        console.log('✅ Setting client history:', data?.length || 0, 'records');
         setClientHistory(data || []);
       }
     } catch (err) {
@@ -839,12 +897,20 @@ export default function ClientesLealtad() {
 
   // Abrir historial de un programa específico del cliente
   const openProgramHistory = (cliente, program) => {
-    console.log('openProgramHistory called with client, program:', { cliente, program });
+    console.log('🔍 openProgramHistory called with:', { cliente, program });
+    console.log('🔍 program.program_folio:', program?.program_folio);
+    console.log('🔍 program.programFolio:', program?.programFolio);
+    console.log('🔍 Full program object:', program);
+    
     setSelectedClient(cliente);
     setHistoryModalOpen(true);
     setHistoryTypeFilter(program?.type || null);
-    const programId = program?.id || program?.program_number || null;
-    getClientHistory(cliente.id, programId);
+    
+    // USAR PROGRAM_FOLIO en lugar de program_id
+    const programFolio = program?.program_folio || program?.programFolio || null;
+    console.log('🔍 Using programFolio:', programFolio);
+    
+    getClientHistoryByFolio(cliente.id, programFolio);
   };
 
   // Cerrar modal de historial
