@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import { useAuthWithLogging } from '../utils/useAuthWithLogging';
 
 export default function ClienteLogin() {
   const [clientId, setClientId] = useState('');
@@ -8,6 +9,7 @@ export default function ClienteLogin() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const { loginClient } = useAuthWithLogging();
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -15,36 +17,26 @@ export default function ClienteLogin() {
     setError('');
     
     try {
-      // Buscar cliente por ID y verificar contraseña
-      const { data: customer, error: fetchError } = await supabase
-        .from('customers_')
-        .select('id, razon_social, alias, celular, client_password')
-        .eq('id', clientId)
-        .single();
-
-      if (fetchError || !customer) {
-        setError('ID de cliente no encontrado');
+      // Usar el hook de autenticación con logging
+      const { user, error: authError } = await loginClient(clientId, password);
+      
+      if (authError) {
+        setError(authError.message || 'Error en el login');
         return;
       }
 
-      // Verificar contraseña (en producción, usar hash)
-      if (customer.client_password !== password) {
-        setError('Contraseña incorrecta');
+      if (user) {
+        // Guardar datos del cliente en localStorage
+        localStorage.setItem('clienteData', JSON.stringify(user));
+        navigate('/cliente/dashboard');
         return;
       }
 
-      // Crear sesión
-      localStorage.setItem('cliente_session', JSON.stringify({
-        customer_id: customer.id,
-        name: customer.razon_social || customer.alias,
-        phone: customer.celular
-      }));
-      
-      navigate('/cliente/dashboard');
-      
+      setError('Credenciales inválidas');
+
     } catch (error) {
-      setError('Error al iniciar sesión');
-      console.error('Login error:', error);
+      console.error('Error en login:', error);
+      setError('Error interno del servidor');
     } finally {
       setLoading(false);
     }
