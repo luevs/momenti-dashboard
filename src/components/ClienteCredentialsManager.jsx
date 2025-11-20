@@ -50,6 +50,66 @@ export default function ClienteCredentialsManager({ customer, onUpdate }) {
     setNewPassword(generated);
   };
 
+  const handleCreateCredentials = async () => {
+    setLoading(true);
+    try {
+      // Generar un nuevo access_id secuencial
+      const { data: maxIdData } = await supabase
+        .from('client_access_credentials')
+        .select('access_id')
+        .order('access_id', { ascending: false })
+        .limit(1);
+      
+      let nextAccessId = '100'; // ID por defecto
+      if (maxIdData && maxIdData.length > 0) {
+        const maxId = parseInt(maxIdData[0].access_id) || 99;
+        nextAccessId = (maxId + 1).toString();
+      }
+
+      // Generar contraseña automáticamente
+      const autoPassword = generateRandomPassword();
+
+      // Crear credenciales en client_access_credentials
+      const { data, error } = await supabase
+        .from('client_access_credentials')
+        .insert({
+          customer_id: customer.id,
+          access_id: nextAccessId,
+          password: autoPassword,
+          is_active: true
+        })
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      // Actualizar también en customers_ por compatibilidad
+      await supabase
+        .from('customers_')
+        .update({ client_password: autoPassword })
+        .eq('id', customer.id);
+
+      alert(`✅ Credenciales creadas exitosamente!\n\nID de Acceso: ${nextAccessId}\nContraseña: ${autoPassword}`);
+      
+      // Actualizar credenciales localmente
+      setAccessCredentials({
+        customer_id: customer.id,
+        access_id: nextAccessId,
+        password: autoPassword,
+        is_active: true
+      });
+      
+      onUpdate && onUpdate();
+    } catch (error) {
+      console.error('Error creating credentials:', error);
+      alert('Error al crear credenciales: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleUpdatePassword = async () => {
     if (!newPassword.trim()) {
       alert('Por favor ingresa una contraseña');
@@ -138,19 +198,33 @@ Necesitas ayuda? Contactanos!`;
       <div className="flex justify-between items-center">
         <h3 className="font-semibold text-gray-800">Acceso Cliente</h3>
         <div className="flex gap-2">
-          <button
-            onClick={copyCredentials}
-            className="text-blue-600 hover:text-blue-800 text-sm px-2 py-1 rounded border border-blue-200 hover:bg-blue-50"
-          >
-            📋 Copiar credenciales
-          </button>
-          {customer?.celular && accessCredentials?.access_id && (
-            <button
-              onClick={sendWhatsAppCredentials}
-              className="text-green-600 hover:text-green-800 text-sm px-2 py-1 rounded border border-green-200 hover:bg-green-50"
-            >
-              💬 Enviar WhatsApp
-            </button>
+          {accessCredentials ? (
+            <>
+              <button
+                onClick={copyCredentials}
+                className="text-blue-600 hover:text-blue-800 text-sm px-2 py-1 rounded border border-blue-200 hover:bg-blue-50"
+              >
+                📋 Copiar credenciales
+              </button>
+              {customer?.celular && accessCredentials?.access_id && (
+                <button
+                  onClick={sendWhatsAppCredentials}
+                  className="text-green-600 hover:text-green-800 text-sm px-2 py-1 rounded border border-green-200 hover:bg-green-50"
+                >
+                  💬 Enviar WhatsApp
+                </button>
+              )}
+            </>
+          ) : (
+            !loadingCredentials && (
+              <button
+                onClick={handleCreateCredentials}
+                disabled={loading}
+                className="bg-green-600 text-white text-sm px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50 font-medium"
+              >
+                {loading ? 'Creando...' : '🔑 Crear Credenciales'}
+              </button>
+            )
           )}
         </div>
       </div>
@@ -231,8 +305,17 @@ Necesitas ayuda? Contactanos!`;
         </button>
         
         {!accessCredentials && !loadingCredentials && (
-          <div className="text-xs text-orange-600 bg-orange-50 rounded p-2">
-            ⚠️ Este cliente no tiene credenciales de acceso configuradas
+          <div className="space-y-3">
+            <div className="text-xs text-orange-600 bg-orange-50 rounded p-2">
+              ⚠️ Este cliente no tiene credenciales de acceso configuradas
+            </div>
+            <button
+              onClick={handleCreateCredentials}
+              disabled={loading}
+              className="w-full bg-green-600 text-white py-2 rounded hover:bg-green-700 disabled:opacity-50 font-medium"
+            >
+              {loading ? 'Creando credenciales...' : '🔑 Crear Credenciales de Acceso'}
+            </button>
           </div>
         )}
       </div>
