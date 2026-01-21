@@ -29,6 +29,7 @@ export default function Layout({ children }) {
       path: '/clientes', label: 'Clientes', icon: ClipboardList,
       children: [
         { path: '/clientes-lealtad', label: 'Clientes Lealtad', icon: Users },
+        { path: '/clientes/entrega-producto', label: 'Entrega de Producto', icon: Package2 },
       ]
     },
     {
@@ -148,6 +149,7 @@ export default function Layout({ children }) {
                   const path = location.pathname;
                   if (path === '/') return 'Dashboard';
                   if (path === '/clientes-lealtad') return 'Clientes con Programa de Lealtad';
+                  if (path === '/clientes/entrega-producto') return 'Entrega de Producto';
                   if (path === '/operacion') return 'Operación de Máquinas';
                   if (path === '/trabajo-ocr') return 'Carga de Tirajes OCR';
                   if (path === '/insumos') return 'Gestión de Insumos';

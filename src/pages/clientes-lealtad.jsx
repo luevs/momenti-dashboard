@@ -280,8 +280,31 @@ export default function ClientesLealtad() {
     try {
       isSubmittingMetersRef.current = true;
       setIsSubmittingMeters(true);
-      // calcular nuevos valores
-  const newRemainingMeters = Number((selectedProgram.remaining_meters - metersUsed).toFixed(2));
+      
+      // 🔥 OBTENER VALOR ACTUAL DE LA BASE DE DATOS (NO CONFIAR EN selectedProgram)
+      console.log("🔥 OBTENIENDO REMAINING METERS ACTUAL DE LA BASE DE DATOS...");
+      
+      const { data: programData, error: fetchError } = await supabase
+        .from('loyalty_programs')
+        .select('remaining_meters, total_meters, status')
+        .eq('id', selectedProgramId)
+        .single();
+      
+      if (fetchError || !programData) {
+        console.error("Error al obtener programa:", fetchError);
+        alert("Error al consultar el programa: " + (fetchError?.message || 'Programa no encontrado'));
+        return;
+      }
+      
+      // Usar el remaining_meters ACTUAL de la base de datos
+      const currentRemaining = Number(programData.remaining_meters) || 0;
+      console.log(`🔥 Remaining REAL en DB: ${currentRemaining}m`);
+      console.log(`🔥 Metros a consumir ahora: ${metersUsed}m`);
+      
+      // Calcular nuevo remaining: ACTUAL - CONSUMO
+      const newRemainingMeters = Number((currentRemaining - metersUsed).toFixed(2));
+      console.log(`🔥 NUEVO remaining: ${newRemainingMeters}m`);
+      
       const newStatus = newRemainingMeters <= 0 ? 'completado' : 'activo';
       const completionDate = newRemainingMeters <= 0 ? new Date().toISOString().split('T')[0] : null;
 
@@ -367,59 +390,8 @@ export default function ClientesLealtad() {
         throw err;
       }
 
-      // --- Verificación adicional: comprobar suma total de metros consumidos ---
-      try {
-        // Obtener suma de meters_consumed en ambas tablas (orders + order_history) para este programa
-        const programId = selectedProgramId;
-        const customerId = selectedCustomerForMeters?.id;
-
-        // traer consumos desde orders
-        const { data: ordersForSum } = await supabase
-          .from('orders')
-          .select('meters_consumed')
-          .eq('program_id', programId)
-          .eq('customer_id', customerId);
-
-        // traer consumos desde order_history
-        const { data: historyForSum } = await supabase
-          .from('order_history')
-          .select('meters_consumed')
-          .eq('program_id', programId)
-          .eq('customer_id', customerId);
-
-        const totalConsumedFromOrders = (ordersForSum || []).reduce((s, r) => s + Number(r?.meters_consumed || 0), 0);
-        const totalConsumedFromHistory = (historyForSum || []).reduce((s, r) => s + Number(r?.meters_consumed || 0), 0);
-        const totalConsumed = Number((totalConsumedFromOrders + totalConsumedFromHistory).toFixed(2));
-
-        console.log('Verificación metros - programId:', programId, 'customerId:', customerId, {
-          totalConsumedFromOrders,
-          totalConsumedFromHistory,
-          totalConsumed,
-          selectedProgramTotal: selectedProgram.total_meters
-        });
-
-        const expectedRemaining = Number((Number(selectedProgram.total_meters || 0) - totalConsumed).toFixed(2));
-        const normalizedExpectedRemaining = expectedRemaining <= 0 ? 0 : expectedRemaining;
-
-        // Si la suma histórica alcanza o excede el total, forzar remaining 0
-        if (Math.abs(normalizedExpectedRemaining - newRemainingMeters) > 0.001) {
-          console.log('Ajustando remaining_meters a partir de suma histórica:', normalizedExpectedRemaining, ' (antes: ', newRemainingMeters, ')');
-          const { error: adjustError } = await supabase
-            .from('loyalty_programs')
-            .update({ remaining_meters: normalizedExpectedRemaining, status: normalizedExpectedRemaining <= 0 ? 'completado' : selectedProgram.status, updated_at: new Date().toISOString() })
-            .eq('id', selectedProgramId);
-
-          if (adjustError) {
-            console.error('Error ajustando remaining_meters según suma histórica:', adjustError);
-            // no bloqueamos el flujo principal, pero avisamos
-            alert('Advertencia: no se pudo ajustar automáticamente metros restantes en la base de datos. Revisa la consola.');
-          }
-        } else {
-          console.log('Remaining coincide con suma histórica. No hay ajuste necesario.');
-        }
-      } catch (verifyErr) {
-        console.error('Error durante verificación de suma de metros:', verifyErr);
-      }
+      // ✅ YA NO RECALCULAMOS - CONFIAMOS EN EL VALOR ACTUAL DE remaining_meters
+      console.log('✅ Remaining meters actualizado correctamente a:', newRemainingMeters);
 
       // 3) Preparar datos para modal Post-Pedido
   // Usar folio de 3 dígitos consistente para tickets
@@ -711,20 +683,20 @@ export default function ClientesLealtad() {
       console.log("Programas encontrados:", programsData?.length || 0);
       console.log("Clientes encontrados:", customersData?.length || 0);
       
-      // 5. COMBINAR CLIENTES CON SUS PROGRAMAS Y RECALCULAR METROS
+      // 5. COMBINAR CLIENTES CON SUS PROGRAMAS - USAR VALORES REALES DE SUPABASE
       const customersWithProgramsData = customersData.map(customer => {
         const customerPrograms = programsData.filter(p => p.customer_id === customer.id).map(program => {
-          // RECALCULAR remaining_meters basado en order_history
+          // USAR EL VALOR REAL DE SUPABASE, NO RECALCULAR
+          const realRemainingMeters = parseFloat(program.remaining_meters) || 0;
           const folioKey = `${customer.id}-${program.program_folio}`;
           const consumedFromHistory = consumedByFolio[folioKey] || 0;
           const totalMeters = parseFloat(program.total_meters) || 0;
-          const recalculatedRemaining = Math.max(0, totalMeters - consumedFromHistory);
           
-          console.log(`🔥 Programa ${program.program_folio}: total=${totalMeters}, consumido=${consumedFromHistory}, restante=${recalculatedRemaining}`);
+          console.log(`🔥 Programa ${program.program_folio}: real_remaining=${realRemainingMeters}, total=${totalMeters}, consumed_history=${consumedFromHistory}`);
           
           return {
             ...program,
-            remaining_meters: recalculatedRemaining, // USAR EL VALOR RECALCULADO
+            remaining_meters: realRemainingMeters, // ✅ USAR EL VALOR REAL DE SUPABASE
             consumed_from_history: consumedFromHistory // Para debugging
           };
         });
@@ -808,6 +780,19 @@ export default function ClientesLealtad() {
     fetchCustomersWithPrograms();
   }, []);
 
+  // 🔄 POLLING: Actualizar datos automáticamente cada 2 minutos
+  useEffect(() => {
+    const pollingInterval = setInterval(() => {
+      // Solo hacer polling si la ventana está visible
+      if (document.visibilityState === 'visible') {
+        console.log('🔄 Polling: Actualizando datos automáticamente...');
+        fetchCustomersWithPrograms();
+      }
+    }, 120000); // 2 minutos
+
+    return () => clearInterval(pollingInterval);
+  }, []);
+
   useEffect(() => {
     if (!showFilters) return;
 
@@ -825,59 +810,75 @@ export default function ClientesLealtad() {
   const getClientHistoryByFolio = async (clientId, programFolio = null) => {
     setIsLoadingHistory(true);
     try {
-      console.log('🔍 getClientHistoryByFolio called with:', { clientId, programFolio });
+      console.log('🔍🔍🔍 BUSCANDO HISTORIAL COMPLETO:', { clientId, programFolio });
+      
+      const cliente = customersWithPrograms.find(c => c.id === clientId);
+      const clientName = cliente?.razon_social || cliente?.name;
+      console.log('🔍 Cliente encontrado:', clientName);
 
-      // Buscar tanto por customer_id como client_id para compatibilidad con registros antiguos
-      let query = supabase
+      let allRecords = [];
+      
+      // 🔥 BÚSQUEDA 1: Por customer_id/client_id + program_folio
+      console.log('🔥 BÚSQUEDA 1: Por IDs + folio');
+      let query1 = supabase
         .from('order_history')
         .select('*')
         .or(`customer_id.eq.${clientId},client_id.eq.${clientId}`);
-
-      // Filtrar por program_folio si se proporciona
+      
       if (programFolio) {
-        console.log('🔍 Filtering by program_folio:', programFolio);
-        query = query.eq('program_folio', programFolio);
+        query1 = query1.eq('program_folio', programFolio);
       }
+      
+      const { data: records1, error: error1 } = await query1.order('recorded_at', { ascending: false });
+      console.log('🔍 Resultados búsqueda 1:', records1?.length || 0, error1);
+      if (records1) allRecords = [...allRecords, ...records1];
 
-      const { data, error } = await query.order('recorded_at', { ascending: false });
-      
-      console.log('📊 Query result:', { data: data?.length, error, programFolio });
-      
-      // Si no encuentra por ID, buscar por nombre como fallback
-      if (!data || data.length === 0) {
-        console.log('🔄 Trying fallback search by name');
-        const cliente = customersWithPrograms.find(c => c.id === clientId);
-        const clientName = cliente?.razon_social || cliente?.name;
+      // 🔥 BÚSQUEDA 2: Por nombre del cliente
+      if (clientName) {
+        console.log('🔥 BÚSQUEDA 2: Por nombre del cliente');
+        let query2 = supabase
+          .from('order_history')
+          .select('*')
+          .eq('client_name', clientName);
         
-        if (clientName) {
-          let nameQuery = supabase
-            .from('order_history')
-            .select('*')
-            .eq('client_name', clientName);
-          
-          // Si hay filtro de folio, aplicarlo también
-          if (programFolio) {
-            nameQuery = nameQuery.eq('program_folio', programFolio);
-          }
-          
-          const { data: nameData, error: nameError } = await nameQuery.order('recorded_at', { ascending: false });
-          
-          if (!nameError && nameData && nameData.length > 0) {
-            console.log('✅ Found records by name:', nameData.length);
-            setClientHistory(nameData);
-            setIsLoadingHistory(false);
-            return;
-          }
+        if (programFolio) {
+          query2 = query2.eq('program_folio', programFolio);
         }
+        
+        const { data: records2, error: error2 } = await query2.order('recorded_at', { ascending: false });
+        console.log('🔍 Resultados búsqueda 2:', records2?.length || 0, error2);
+        if (records2) allRecords = [...allRecords, ...records2];
       }
 
-      if (error) {
-        console.error("Error al obtener historial:", error);
-        setClientHistory([]);
-      } else {
-        console.log('✅ Setting client history:', data?.length || 0, 'records');
-        setClientHistory(data || []);
+      // 🔥 BÚSQUEDA 3: También en tabla 'orders' (puede tener registros)
+      console.log('🔥 BÚSQUEDA 3: En tabla orders');
+      let query3 = supabase
+        .from('orders')
+        .select('*')
+        .or(`customer_id.eq.${clientId},client_id.eq.${clientId}`);
+      
+      if (programFolio) {
+        query3 = query3.eq('program_folio', programFolio);
       }
+      
+      const { data: records3, error: error3 } = await query3.order('recorded_at', { ascending: false });
+      console.log('🔍 Resultados búsqueda 3 (orders):', records3?.length || 0, error3);
+      if (records3) allRecords = [...allRecords, ...records3];
+
+      // 🔥 ELIMINAR DUPLICADOS por ID único
+      const uniqueRecords = allRecords.filter((record, index, self) => 
+        index === self.findIndex(r => r.id === record.id)
+      );
+      
+      console.log('🔍 TOTAL REGISTROS ÚNICOS ENCONTRADOS:', uniqueRecords.length);
+      console.log('🔍 Registros detallados:', uniqueRecords.map(r => ({
+        id: r.id,
+        meters: r.meters_consumed,
+        fecha: r.recorded_at,
+        folio: r.program_folio
+      })));
+
+      setClientHistory(uniqueRecords || []);
     } catch (err) {
       console.error('Error inesperado al obtener historial:', err);
       setClientHistory([]);

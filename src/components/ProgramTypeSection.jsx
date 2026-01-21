@@ -296,13 +296,24 @@ export default function ProgramTypeSection({
             <button
               onClick={() => {
                 console.log('🚀 ProgramTypeSection onClick - Registrar Metros');
-                console.log('📋 Data to pass:', { 
+                console.log('🔥 Registering meters for:', { 
                   resolvedCustomerId, 
                   customer, 
                   type, 
                   activePrograms 
                 });
-                onRegisterMeters && onRegisterMeters(resolvedCustomerId || customer, type, activePrograms);
+                
+                // 🔥 FILTRAR SOLO PROGRAMAS DEL TIPO CORRECTO
+                const programsOfThisType = activePrograms.filter(p => p.type === type);
+                console.log(`🔥 Registrando metros para tipo: ${type}`);
+                console.log(`🔥 Programas filtrados:`, programsOfThisType.map(p => ({
+                  id: p.id,
+                  folio: p.program_folio,
+                  type: p.type,
+                  remaining: p.remaining_meters
+                })));
+                
+                onRegisterMeters && onRegisterMeters(resolvedCustomerId || customer, type, programsOfThisType);
               }}
               className="flex items-center gap-1 px-3 py-1 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
             >

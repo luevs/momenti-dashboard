@@ -22,6 +22,7 @@ import CajaPage from "./pages/Caja/CajaPage.jsx";
 // NUEVOS: pages de Clientes (asegúrate que existan los archivos)
 import Clientes from "./pages/Clientes";
 import ClienteDetalle from "./pages/ClienteDetalle";
+import EntregaProducto from "./pages/EntregaProducto";
 
 // NUEVOS: Dashboard para clientes
 import ClienteLogin from "./pages/ClienteLogin";
@@ -176,6 +177,11 @@ function App() {
         <Route path="/clientes/:id" element={
           <PrivateRoute>
             <Layout><ClienteDetalle /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/clientes/entrega-producto" element={
+          <PrivateRoute>
+            <Layout><EntregaProducto /></Layout>
           </PrivateRoute>
         } />
 

@@ -40,6 +40,7 @@ export default function Maquinas() {
   const [corteFecha, setCorteFecha] = useState(new Date().toISOString().slice(0,10));
   const [registroFecha, setRegistroFecha] = useState(new Date().toISOString().slice(0, 10));
   const [latestRecords, setLatestRecords] = useState({}); // { [machineId]: { date, meters_printed, registered_by } }
+  const [todayTotals, setTodayTotals] = useState({}); // { [machineId]: total meters today }
   const [queues, setQueues] = useState({}); // { [machineId]: array of jobs }
   const [queueModalOpen, setQueueModalOpen] = useState(false);
   const [queueMachine, setQueueMachine] = useState(null);
@@ -75,8 +76,40 @@ export default function Maquinas() {
     }
   };
 
+  // fetch today's total meters for each machine
+  const fetchTodayTotals = async () => {
+    try {
+      const ids = impresoras.map(i => i.id);
+      if (!ids.length) { setTodayTotals({}); return; }
+      
+      const today = getLocalDateString();
+      const { data, error } = await supabase
+        .from('machine_daily_prints')
+        .select('machine_id, meters_printed')
+        .in('machine_id', ids)
+        .eq('date', today);
+      
+      if (error) {
+        console.error('fetchTodayTotals error', error);
+        return;
+      }
+      
+      const map = {};
+      (data || []).forEach(r => {
+        if (!map[r.machine_id]) {
+          map[r.machine_id] = 0;
+        }
+        map[r.machine_id] += Number(r.meters_printed) || 0;
+      });
+      setTodayTotals(map);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   useEffect(() => {
     fetchLatestRecords();
+    fetchTodayTotals();
   }, [impresoras]);
 
   // fetch queue per machine
@@ -242,6 +275,7 @@ export default function Maquinas() {
 
     // actualizar UI localmente
     setLatestRecords(prev => ({ ...prev, [impresoraSeleccionada.id]: { ...payload } }));
+    await fetchTodayTotals(); // refresh today's totals
     alert("Registro guardado");
     setRegistroModalOpen(false);
     setMetrosHoy("");
@@ -314,6 +348,7 @@ export default function Maquinas() {
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
         {impresoras.map((impresora) => {
           const last = latestRecords[impresora.id];
+          const todayTotal = todayTotals[impresora.id] || 0;
           const registeredToday = last && String(last.date).slice(0,10) === getLocalDateString();
           return (
             <div
@@ -333,6 +368,12 @@ export default function Maquinas() {
                       {last
                         ? <>Último: <strong>{Number(last.meters_printed).toFixed(2)} m</strong> — {String(last.date).slice(0,10)}</>
                         : <>Sin registros</>
+                      }
+                    </p>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {todayTotal > 0 
+                        ? <>Hoy: <strong>{todayTotal.toFixed(2)} m</strong></>
+                        : <>Hoy: <span className="text-gray-400">Sin registros</span></>
                       }
                     </p>
                   </div>
