@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { Search, Printer, Plus, Trash2, Save } from 'lucide-react';
+import { Search, Printer, Plus, Trash2, Save, Eye, X } from 'lucide-react';
 
 export default function EntregaProducto() {
   // Estados principales
@@ -21,6 +21,14 @@ export default function EntregaProducto() {
   // Estados UI
   const [isLoading, setIsLoading] = useState(false);
   const [mensaje, setMensaje] = useState({ tipo: '', texto: '' });
+  
+  // Modal de detalle
+  const [trabajoDetalle, setTrabajoDetalle] = useState(null);
+  const [mostrarDetalle, setMostrarDetalle] = useState(false);
+  
+  // Modal de confirmación de eliminación
+  const [mostrarConfirmacionEliminar, setMostrarConfirmacionEliminar] = useState(false);
+  const [trabajoAEliminar, setTrabajoAEliminar] = useState(null);
 
   // Cargar clientes al montar
   useEffect(() => {
@@ -327,6 +335,85 @@ export default function EntregaProducto() {
     setTimeout(() => setMensaje({ tipo: '', texto: '' }), 3000);
   };
 
+  const abrirDetalle = (trabajo) => {
+    setTrabajoDetalle(trabajo);
+    setMostrarDetalle(true);
+  };
+
+  const cerrarDetalle = () => {
+    setMostrarDetalle(false);
+    setTrabajoDetalle(null);
+  };
+
+  const actualizarEstado = async (trabajoId, nuevoEstado) => {
+    try {
+      const { error } = await supabase
+        .from('entregas_producto')
+        .update({ estado: nuevoEstado })
+        .eq('id', trabajoId);
+
+      if (error) throw error;
+
+      mostrarMensaje('success', 'Estado actualizado correctamente');
+      cargarTrabajos();
+      
+      // Actualizar el estado en el modal si está abierto
+      if (trabajoDetalle && trabajoDetalle.id === trabajoId) {
+        setTrabajoDetalle({ ...trabajoDetalle, estado: nuevoEstado });
+      }
+    } catch (error) {
+      console.error('Error al actualizar estado:', error);
+      mostrarMensaje('error', 'Error al actualizar el estado');
+    }
+  };
+
+  const getEstadoBadge = (estado) => {
+    const estados = {
+      recibido: { bg: 'bg-blue-100', text: 'text-blue-800', label: 'Recibido' },
+      en_proceso: { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'En Proceso' },
+      completado: { bg: 'bg-green-100', text: 'text-green-800', label: 'Completado' },
+      entregado: { bg: 'bg-purple-100', text: 'text-purple-800', label: 'Entregado' },
+      cancelado: { bg: 'bg-red-100', text: 'text-red-800', label: 'Cancelado' }
+    };
+    return estados[estado] || estados.recibido;
+  };
+
+  const confirmarEliminar = (trabajo) => {
+    setTrabajoAEliminar(trabajo);
+    setMostrarConfirmacionEliminar(true);
+  };
+
+  const cancelarEliminar = () => {
+    setMostrarConfirmacionEliminar(false);
+    setTrabajoAEliminar(null);
+  };
+
+  const eliminarTrabajo = async () => {
+    if (!trabajoAEliminar) return;
+
+    try {
+      const { error } = await supabase
+        .from('entregas_producto')
+        .delete()
+        .eq('id', trabajoAEliminar.id);
+
+      if (error) throw error;
+
+      mostrarMensaje('success', `Trabajo #${trabajoAEliminar.id} eliminado correctamente`);
+      cargarTrabajos();
+      
+      // Cerrar modales
+      setMostrarConfirmacionEliminar(false);
+      setTrabajoAEliminar(null);
+      if (mostrarDetalle && trabajoDetalle?.id === trabajoAEliminar.id) {
+        cerrarDetalle();
+      }
+    } catch (error) {
+      console.error('Error al eliminar trabajo:', error);
+      mostrarMensaje('error', 'Error al eliminar el trabajo');
+    }
+  };
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -492,34 +579,262 @@ export default function EntregaProducto() {
               trabajos.map(trabajo => (
                 <div key={trabajo.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
                   <div className="flex justify-between items-start mb-2">
-                    <div>
+                    <div className="flex-1">
                       <div className="font-medium text-gray-900">
                         {trabajo.customer?.razon_social || trabajo.customer?.alias || 'Cliente no encontrado'}
                       </div>
                       <div className="text-sm text-gray-600">{trabajo.tipo_trabajo}</div>
                     </div>
-                    <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
-                      Folio: {trabajo.id}
-                    </span>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
+                        Folio: {trabajo.id}
+                      </span>
+                      <span className={`px-2 py-1 text-xs rounded-full font-medium ${
+                        getEstadoBadge(trabajo.estado).bg
+                      } ${
+                        getEstadoBadge(trabajo.estado).text
+                      }`}>
+                        {getEstadoBadge(trabajo.estado).label}
+                      </span>
+                    </div>
                   </div>
                   
                   <div className="text-sm text-gray-600 mb-3">
                     {trabajo.productos?.length || 0} producto(s) - {new Date(trabajo.created_at).toLocaleDateString('es-MX')}
                   </div>
                   
-                  <button
-                    onClick={() => imprimirTicket(trabajo)}
-                    className="w-full bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2 text-sm"
-                  >
-                    <Printer size={16} />
-                    Reimprimir Ticket
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => abrirDetalle(trabajo)}
+                      className="flex-1 bg-gray-100 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-200 flex items-center justify-center gap-2 text-sm border border-gray-300"
+                    >
+                      <Eye size={16} />
+                      Ver Detalle
+                    </button>
+                    <button
+                      onClick={() => imprimirTicket(trabajo)}
+                      className="flex-1 bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2 text-sm"
+                    >
+                      <Printer size={16} />
+                      Reimprimir
+                    </button>
+                  </div>
                 </div>
               ))
             )}
           </div>
         </div>
       </div>
+
+      {/* Modal de Detalle del Trabajo */}
+      {mostrarDetalle && trabajoDetalle && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Header del modal */}
+            <div className="sticky top-0 bg-white border-b border-gray-200 p-6 flex justify-between items-start">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-800">Detalle del Trabajo</h2>
+                <p className="text-sm text-gray-600 mt-1">Folio: {trabajoDetalle.id}</p>
+              </div>
+              <button
+                onClick={cerrarDetalle}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* Contenido del modal */}
+            <div className="p-6 space-y-6">
+              {/* Información del cliente */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
+                  <span className="text-lg">👤</span>
+                  Información del Cliente
+                </h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-600">Nombre:</span>
+                    <p className="font-medium text-gray-900">
+                      {trabajoDetalle.customer?.razon_social || trabajoDetalle.customer?.alias || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Teléfono:</span>
+                    <p className="font-medium text-gray-900">{trabajoDetalle.customer?.celular || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Email:</span>
+                    <p className="font-medium text-gray-900">{trabajoDetalle.customer?.email || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Fecha de entrega:</span>
+                    <p className="font-medium text-gray-900">
+                      {new Date(trabajoDetalle.created_at).toLocaleString('es-MX')}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tipo de trabajo */}
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                <h3 className="font-bold text-purple-900 mb-2 flex items-center gap-2">
+                  <span className="text-lg">🔧</span>
+                  Tipo de Trabajo
+                </h3>
+                <p className="text-lg font-medium text-gray-900">{trabajoDetalle.tipo_trabajo}</p>
+              </div>
+
+              {/* Productos entregados */}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <h3 className="font-bold text-green-900 mb-3 flex items-center gap-2">
+                  <span className="text-lg">📦</span>
+                  Productos Entregados ({trabajoDetalle.productos?.length || 0})
+                </h3>
+                <div className="space-y-3">
+                  {trabajoDetalle.productos?.map((producto, index) => (
+                    <div key={index} className="bg-white border border-green-200 rounded-lg p-3">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="font-medium text-gray-900">
+                          {index + 1}. {producto.nombre}
+                        </span>
+                        <span className="bg-green-600 text-white px-2 py-1 rounded text-sm font-bold">
+                          x{producto.cantidad}
+                        </span>
+                      </div>
+                      {producto.descripcion && (
+                        <p className="text-sm text-gray-600 mt-2 italic pl-4">
+                          {producto.descripcion}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                  <div className="pt-2 border-t border-green-300 text-right">
+                    <span className="font-bold text-green-900">
+                      Total de artículos: {trabajoDetalle.productos?.reduce((sum, p) => sum + parseInt(p.cantidad || 0), 0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Observaciones */}
+              {trabajoDetalle.observaciones && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <h3 className="font-bold text-yellow-900 mb-2 flex items-center gap-2">
+                    <span className="text-lg">📝</span>
+                    Observaciones
+                  </h3>
+                  <p className="text-gray-800 whitespace-pre-wrap">{trabajoDetalle.observaciones}</p>
+                </div>
+              )}
+
+              {/* Estado del trabajo */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <span className="text-lg">📊</span>
+                  Estado del Trabajo
+                </h3>
+                <div className="flex items-center gap-3">
+                  <select
+                    value={trabajoDetalle.estado}
+                    onChange={(e) => actualizarEstado(trabajoDetalle.id, e.target.value)}
+                    className={`px-4 py-2 rounded-lg border-2 font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                      trabajoDetalle.estado === 'recibido' ? 'border-blue-300 bg-blue-50 text-blue-800' :
+                      trabajoDetalle.estado === 'en_proceso' ? 'border-yellow-300 bg-yellow-50 text-yellow-800' :
+                      trabajoDetalle.estado === 'completado' ? 'border-green-300 bg-green-50 text-green-800' :
+                      trabajoDetalle.estado === 'entregado' ? 'border-purple-300 bg-purple-50 text-purple-800' :
+                      'border-red-300 bg-red-50 text-red-800'
+                    }`}
+                  >
+                    <option value="recibido">🔵 Recibido</option>
+                    <option value="en_proceso">🟡 En Proceso</option>
+                    <option value="completado">🟢 Completado</option>
+                    <option value="entregado">🟣 Entregado</option>
+                    <option value="cancelado">🔴 Cancelado</option>
+                  </select>
+                  <span className="text-sm text-gray-600 italic">
+                    Selecciona para cambiar el estado
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer del modal con acciones */}
+            <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 p-6 flex gap-3">
+              <button
+                onClick={() => confirmarEliminar(trabajoDetalle)}
+                className="px-4 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center gap-2 font-medium"
+              >
+                <Trash2 size={20} />
+                Eliminar
+              </button>
+              <button
+                onClick={() => {
+                  imprimirTicket(trabajoDetalle);
+                  cerrarDetalle();
+                }}
+                className="flex-1 bg-blue-500 text-white px-4 py-3 rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2 font-medium"
+              >
+                <Printer size={20} />
+                Imprimir Ticket
+              </button>
+              <button
+                onClick={cerrarDetalle}
+                className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmación de Eliminación */}
+      {mostrarConfirmacionEliminar && trabajoAEliminar && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                  <Trash2 size={24} className="text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">Confirmar Eliminación</h3>
+                  <p className="text-sm text-gray-600">Esta acción no se puede deshacer</p>
+                </div>
+              </div>
+
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                <p className="text-sm text-gray-800 mb-2">
+                  ¿Estás seguro de que deseas eliminar este trabajo?
+                </p>
+                <div className="space-y-1 text-sm">
+                  <div><strong>Folio:</strong> {trabajoAEliminar.id}</div>
+                  <div><strong>Cliente:</strong> {trabajoAEliminar.customer?.razon_social || trabajoAEliminar.customer?.alias}</div>
+                  <div><strong>Tipo:</strong> {trabajoAEliminar.tipo_trabajo}</div>
+                  <div><strong>Productos:</strong> {trabajoAEliminar.productos?.length || 0} producto(s)</div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={cancelarEliminar}
+                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={eliminarTrabajo}
+                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium flex items-center justify-center gap-2"
+                >
+                  <Trash2 size={18} />
+                  Eliminar Trabajo
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
