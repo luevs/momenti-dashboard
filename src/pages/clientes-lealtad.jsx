@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText, SlidersHorizontal, LayoutGrid, Table2, Users, Sparkles, Ruler, Search, Key } from "lucide-react";
+import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText, SlidersHorizontal, LayoutGrid, Table2, Users, Sparkles, Ruler, Search, Key, Download } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import useCurrentUser from '../utils/useCurrentUser';
 import { generateTicketHTML } from '../utils/ticketUtils';
@@ -161,6 +161,7 @@ export default function ClientesLealtad() {
   const signatureRef = React.useRef();
 
   const [selectedType, setSelectedType] = useState('Todos');
+  const [statusFilter, setStatusFilter] = useState('Todos'); // 'Todos', 'Activos', 'Históricos'
   const [viewMode, setViewMode] = useState('cards');
   const [showFilters, setShowFilters] = useState(false);
   const filtersRef = React.useRef(null);
@@ -1503,6 +1504,25 @@ export default function ClientesLealtad() {
       });
     }
 
+    // Filtrar por estado de programas (Activos/Históricos)
+    if (statusFilter !== 'Todos') {
+      filtered = filtered.filter(customer => {
+        if (!customer.programs) return false;
+        
+        let hasMatchingStatus = false;
+        Object.values(customer.programs).forEach(typePrograms => {
+          if (statusFilter === 'Activos' && typePrograms.active?.length > 0) {
+            hasMatchingStatus = true;
+          }
+          if (statusFilter === 'Históricos' && typePrograms.historical?.length > 0) {
+            hasMatchingStatus = true;
+          }
+        });
+        
+        return hasMatchingStatus;
+      });
+    }
+
     // Filtrar clientes a punto de expirar
     if (showExpiringClients) {
       filtered = filtered.filter(customer => {
@@ -1526,38 +1546,56 @@ export default function ClientesLealtad() {
     }
 
     return filtered;
-  }, [customersWithPrograms, searchQuery, selectedType, showExpiringClients]);
+  }, [customersWithPrograms, searchQuery, selectedType, statusFilter, showExpiringClients]);
 
   const loyaltyStats = useMemo(() => {
     const aggregates = {
-      dtfClients: 0,
-      uvClients: 0,
-      totalPrograms: 0,
+      activeCustomers: 0,
+      activeDTFCustomers: 0,
+      activeUVCustomers: 0,
+      activePrograms: 0,
+      historicalPrograms: 0,
+      availableMeters: 0,
       totalMeters: 0,
       totalCustomers: customersWithPrograms.length || 0
     };
 
     customersWithPrograms.forEach(customer => {
       const programsByType = customer.programs || {};
-      const dtfPrograms = programsByType['DTF Textil'];
-      const uvPrograms = programsByType['UV DTF'];
+      let hasActiveProgram = false;
+      let hasActiveDTF = false;
+      let hasActiveUV = false;
 
-      const hasDTF = Boolean(dtfPrograms && ((dtfPrograms.active?.length || 0) + (dtfPrograms.historical?.length || 0)));
-      const hasUV = Boolean(uvPrograms && ((uvPrograms.active?.length || 0) + (uvPrograms.historical?.length || 0)));
-
-      if (hasDTF) aggregates.dtfClients += 1;
-      if (hasUV) aggregates.uvClients += 1;
-
-      Object.values(programsByType).forEach(typePrograms => {
+      Object.entries(programsByType).forEach(([type, typePrograms]) => {
         const active = typePrograms?.active || [];
         const historical = typePrograms?.historical || [];
 
-        aggregates.totalPrograms += active.length + historical.length;
+        // Contar programas activos e históricos
+        aggregates.activePrograms += active.length;
+        aggregates.historicalPrograms += historical.length;
 
-        [...active, ...historical].forEach(program => {
+        // Verificar si tiene programas activos
+        if (active.length > 0) {
+          hasActiveProgram = true;
+          if (type === 'DTF Textil') hasActiveDTF = true;
+          if (type === 'UV DTF') hasActiveUV = true;
+        }
+
+        // Calcular metros disponibles (solo de activos)
+        active.forEach(program => {
+          aggregates.availableMeters += Number(program?.remaining_meters) || 0;
+          aggregates.totalMeters += Number(program?.total_meters) || 0;
+        });
+
+        // Sumar metros totales de históricos
+        historical.forEach(program => {
           aggregates.totalMeters += Number(program?.total_meters) || 0;
         });
       });
+
+      if (hasActiveProgram) aggregates.activeCustomers += 1;
+      if (hasActiveDTF) aggregates.activeDTFCustomers += 1;
+      if (hasActiveUV) aggregates.activeUVCustomers += 1;
     });
 
     return aggregates;
@@ -1565,40 +1603,44 @@ export default function ClientesLealtad() {
 
   const summaryCards = useMemo(() => ([
     {
-      id: 'dtf',
-      label: 'Clientes DTF Textil',
-      value: loyaltyStats.dtfClients,
-      iconBg: 'bg-blue-500/10 text-blue-600',
-      border: 'border-blue-100',
+      id: 'activeCustomers',
+      label: 'Clientes Activos',
+      value: loyaltyStats.activeCustomers,
+      iconBg: 'bg-green-500/10 text-green-600',
+      border: 'border-green-100',
       icon: <Users size={22} />,
-      suffix: ''
+      suffix: '',
+      description: `${loyaltyStats.activeDTFCustomers} DTF • ${loyaltyStats.activeUVCustomers} UV DTF`
     },
     {
-      id: 'uv',
-      label: 'Clientes UV DTF',
-      value: loyaltyStats.uvClients,
+      id: 'activePrograms',
+      label: 'Programas Activos',
+      value: loyaltyStats.activePrograms,
+      iconBg: 'bg-blue-500/10 text-blue-600',
+      border: 'border-blue-100',
+      icon: <User size={22} />,
+      suffix: '',
+      description: `${loyaltyStats.historicalPrograms} programas completados`
+    },
+    {
+      id: 'availableMeters',
+      label: 'Metros Disponibles',
+      value: Math.round(loyaltyStats.availableMeters),
       iconBg: 'bg-purple-500/10 text-purple-600',
       border: 'border-purple-100',
       icon: <Sparkles size={22} />,
-      suffix: ''
+      suffix: 'm',
+      description: 'Metros restantes en programas activos'
     },
     {
-      id: 'programs',
-      label: 'Programas vendidos',
-      value: loyaltyStats.totalPrograms,
-      iconBg: 'bg-green-500/10 text-green-600',
-      border: 'border-green-100',
-      icon: <User size={22} />,
-      suffix: ''
-    },
-    {
-      id: 'meters',
-      label: 'Metros vendidos',
+      id: 'totalMeters',
+      label: 'Metros Vendidos',
       value: Math.round(loyaltyStats.totalMeters),
       iconBg: 'bg-amber-500/10 text-amber-600',
       border: 'border-amber-100',
       icon: <Ruler size={22} />,
-      suffix: 'm'
+      suffix: 'm',
+      description: 'Total de metros contratados'
     }
   ]), [loyaltyStats]);
 
@@ -1606,6 +1648,95 @@ export default function ClientesLealtad() {
     setSelectedType(type);
     setShowExpiringClients(false);
     setShowFilters(false);
+  };
+
+  // Función para exportar clientes con programas a Excel
+  const exportCustomersToExcel = () => {
+    if (!filteredCustomers.length) {
+      alert('No hay clientes para exportar');
+      return;
+    }
+
+    const exportData = [];
+    
+    filteredCustomers.forEach(customer => {
+      const customerName = customer.razon_social || customer.alias || customer.name || 'Sin nombre';
+      const customerPhone = customer.celular || customer.numeroWpp || customer.numero_wpp || '';
+      const customerEmail = customer.email || '';
+      const customerId = customer.id || '';
+      
+      if (customer.programs) {
+        Object.entries(customer.programs).forEach(([type, typePrograms]) => {
+          // Programas activos
+          if (typePrograms.active && typePrograms.active.length > 0) {
+            typePrograms.active.forEach(program => {
+              exportData.push({
+                'ID Cliente': customerId,
+                'Cliente': customerName,
+                'Teléfono': customerPhone,
+                'Email': customerEmail,
+                'Tipo Programa': type,
+                'Estado': 'Activo',
+                'Número Programa': program.program_number || '',
+                'Folio': program.program_folio || '',
+                'Metros Totales': program.total_meters || 0,
+                'Metros Restantes': program.remaining_meters || 0,
+                'Metros Consumidos': (program.total_meters || 0) - (program.remaining_meters || 0),
+                'Fecha Compra': program.purchase_date || '',
+                'Fecha Creación': program.created_at || ''
+              });
+            });
+          }
+          
+          // Programas históricos
+          if (typePrograms.historical && typePrograms.historical.length > 0) {
+            typePrograms.historical.forEach(program => {
+              exportData.push({
+                'ID Cliente': customerId,
+                'Cliente': customerName,
+                'Teléfono': customerPhone,
+                'Email': customerEmail,
+                'Tipo Programa': type,
+                'Estado': 'Histórico',
+                'Número Programa': program.program_number || '',
+                'Folio': program.program_folio || '',
+                'Metros Totales': program.total_meters || 0,
+                'Metros Restantes': program.remaining_meters || 0,
+                'Metros Consumidos': (program.total_meters || 0) - (program.remaining_meters || 0),
+                'Fecha Compra': program.purchase_date || '',
+                'Fecha Creación': program.created_at || '',
+                'Fecha Completado': program.completed_at || ''
+              });
+            });
+          }
+        });
+      } else {
+        // Cliente sin programas
+        exportData.push({
+          'ID Cliente': customerId,
+          'Cliente': customerName,
+          'Teléfono': customerPhone,
+          'Email': customerEmail,
+          'Tipo Programa': '',
+          'Estado': 'Sin programas',
+          'Número Programa': '',
+          'Folio': '',
+          'Metros Totales': 0,
+          'Metros Restantes': 0,
+          'Metros Consumidos': 0,
+          'Fecha Compra': '',
+          'Fecha Creación': ''
+        });
+      }
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Clientes y Programas');
+    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([excelBuffer], { type: 'application/octet-stream' });
+    const timestamp = new Date().toISOString().split('T')[0];
+    saveAs(blob, `clientes_programas_lealtad_${timestamp}.xlsx`);
   };
 
   const fetchGlobalHistory = async () => {
@@ -1820,6 +1951,15 @@ export default function ClientesLealtad() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Clientes con Programa de Lealtad</h1>
         <div className="flex gap-2">
+          {/* Botón de exportar */}
+          <button
+            onClick={exportCustomersToExcel}
+            className="flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-green-100 hover:bg-green-200 transition"
+            title="Exportar base de datos a Excel"
+          >
+            <Download className="text-green-600" size={18} />
+            <span className="text-green-600 font-medium text-sm hidden sm:inline">Exportar</span>
+          </button>
           {/* Botón de historial global */}
           <button
             onClick={() => { setActiveTab("historial"); fetchGlobalHistory(); }}
@@ -1864,11 +2004,7 @@ export default function ClientesLealtad() {
                 <span className="text-3xl font-semibold text-gray-900">{formattedValue}{card.suffix}</span>
               </div>
               <p className="mt-2 text-sm text-gray-500">
-                {card.id === 'meters'
-                  ? 'Metros contratados acumulados'
-                  : card.id === 'programs'
-                    ? 'Programas activos e históricos registrados'
-                    : 'Clientes con al menos un programa vigente o histórico'}
+                {card.description}
               </p>
             </div>
           );
@@ -1904,6 +2040,7 @@ export default function ClientesLealtad() {
               {showFilters && (
                 <div className="absolute right-0 z-20 mt-2 w-56 rounded-lg border border-gray-200 bg-white shadow-lg">
                   <div className="p-2 space-y-1">
+                    <div className="px-3 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Tipo de Programa</div>
                     {['Todos', 'DTF Textil', 'UV DTF'].map(type => (
                       <button
                         key={type}
@@ -1916,6 +2053,25 @@ export default function ClientesLealtad() {
                         }`}
                       >
                         {type}
+                      </button>
+                    ))}
+                    <div className="h-px bg-gray-100" />
+                    <div className="px-3 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Estado</div>
+                    {['Todos', 'Activos', 'Históricos'].map(status => (
+                      <button
+                        key={status}
+                        type="button"
+                        onClick={() => {
+                          setStatusFilter(status);
+                          setShowFilters(false);
+                        }}
+                        className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition ${
+                          statusFilter === status
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        {status}
                       </button>
                     ))}
                     <div className="h-px bg-gray-100" />

@@ -16,7 +16,11 @@ import {
   PieChart,
   Tag,
   Shield,
-  Activity
+  Activity,
+  FileText,
+  Plus,
+  TrendingUp,
+  ShoppingCart
 } from "lucide-react";
 import { isAdmin } from '../utils/auth';
 
@@ -24,10 +28,13 @@ export default function Sidebar() {
   const location = useLocation();
   const [expandedMenus, setExpandedMenus] = useState({});
 
-  // Auto-expandir menú de Caja si estamos en rutas de caja
+  // Auto-expandir menús si estamos en rutas específicas
   useEffect(() => {
     if (location.pathname.startsWith('/caja')) {
       setExpandedMenus(prev => ({ ...prev, caja: true }));
+    }
+    if (location.pathname.startsWith('/cotiza')) {
+      setExpandedMenus(prev => ({ ...prev, cotizaciones: true }));
     }
   }, [location.pathname]);
 
@@ -62,6 +69,14 @@ export default function Sidebar() {
     { path: "/caja/cortes", label: "Cortes de Caja", icon: Calculator, description: "Realizar cortes de caja" },
     { path: "/caja/reportes", label: "Reportes", icon: PieChart, description: "Análisis financieros" },
     { path: "/caja/categorias", label: "Categorías", icon: Tag, description: "Gestionar categorías" },
+  ];
+
+  // Menú expandible de Cotizaciones
+  const cotizacionesSubMenus = [
+    { path: "/cotizaciones", label: "Lista", icon: FileText, description: "Ver todas las cotizaciones" },
+    { path: "/cotizaciones/nueva", label: "Nueva", icon: Plus, description: "Crear nueva cotización" },
+    { path: "/cotizaciones/stats", label: "Estadísticas", icon: TrendingUp, description: "Ver estadísticas" },
+    { path: "/cotizador", label: "Cotizador", icon: ShoppingCart, description: "Calculadora de precios" },
   ];
 
   const finalMenuItems = [
@@ -128,6 +143,52 @@ export default function Sidebar() {
                     className={`flex items-center gap-3 px-3 py-2 rounded text-sm transition-colors ${
                       isMenuItemActive(subItem.path)
                         ? "bg-green-50 text-green-700 font-medium"
+                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    }`}
+                    title={subItem.description}
+                  >
+                    <SubIcon size={16} />
+                    <span>{subItem.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Menú expandible de Cotizaciones */}
+        <div className="space-y-1">
+          <button
+            onClick={() => toggleMenu('cotizaciones')}
+            className={`w-full flex items-center justify-between gap-3 px-4 py-2 rounded transition-colors ${
+              isMenuItemActive('/cotiza')
+                ? "bg-purple-100 text-purple-700 font-semibold"
+                : "hover:bg-gray-100"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <FileText size={20} />
+              <span>Cotizaciones</span>
+            </div>
+            {expandedMenus.cotizaciones ? (
+              <ChevronDown size={16} />
+            ) : (
+              <ChevronRight size={16} />
+            )}
+          </button>
+
+          {/* Submenús de Cotizaciones */}
+          {expandedMenus.cotizaciones && (
+            <div className="ml-4 space-y-1 border-l-2 border-gray-200 pl-4">
+              {cotizacionesSubMenus.map((subItem) => {
+                const SubIcon = subItem.icon;
+                return (
+                  <Link
+                    key={subItem.path}
+                    to={subItem.path}
+                    className={`flex items-center gap-3 px-3 py-2 rounded text-sm transition-colors ${
+                      isMenuItemActive(subItem.path)
+                        ? "bg-purple-50 text-purple-700 font-medium"
                         : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                     }`}
                     title={subItem.description}

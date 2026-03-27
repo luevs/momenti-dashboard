@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Printer, BarChart2, ClipboardList, Users, Settings, DollarSign, Package2, LogOut, FileImage, Receipt, Calculator, PieChart, Tag } from 'lucide-react';
+import { LayoutDashboard, Printer, BarChart2, ClipboardList, Users, Settings, DollarSign, Package2, LogOut, FileImage, Receipt, Calculator, PieChart, Tag, FileText, TrendingUp, ShoppingCart, Plus } from 'lucide-react';
 import { isAdmin } from '../utils/auth';
 import { supabase } from '../supabaseClient';
 import useCurrentUser from '../utils/useCurrentUser';
@@ -30,6 +30,15 @@ export default function Layout({ children }) {
       children: [
         { path: '/clientes-lealtad', label: 'Clientes Lealtad', icon: Users },
         { path: '/clientes/entrega-producto', label: 'Entrega de Producto', icon: Package2 },
+      ]
+    },
+    {
+      path: '/cotizaciones', label: 'Cotizaciones', icon: FileText,
+      children: [
+        { path: '/cotizaciones', label: 'Lista', icon: FileText },
+        { path: '/cotizaciones/nueva', label: 'Nueva', icon: Plus },
+        { path: '/cotizaciones/stats', label: 'Estadísticas', icon: TrendingUp },
+        { path: '/cotizador', label: 'Cotizador', icon: ShoppingCart },
       ]
     },
     {
@@ -153,7 +162,14 @@ export default function Layout({ children }) {
                   if (path === '/operacion') return 'Operación de Máquinas';
                   if (path === '/trabajo-ocr') return 'Carga de Tirajes OCR';
                   if (path === '/insumos') return 'Gestión de Insumos';
-                  if (path === '/reportes') return 'Reportes y Análisis';
+                  if (path === '/retizaciones') return 'Cotizaciones';
+                  if (path.startsWith('/cotizaciones/')) {
+                    if (path.includes('/nueva')) return 'Nueva Cotización';
+                    if (path.includes('/editar')) return 'Editar Cotización';
+                    if (path.includes('/stats')) return 'Estadísticas de Cotizaciones';
+                    return 'Detalle de Cotización';
+                  }
+                  if (path === '/coportes') return 'Reportes y Análisis';
                   if (path === '/corte') return 'Corte de Caja';
                   if (path === '/caja' || path === '/caja/movimientos') return 'Gestión de Caja - Movimientos';
                   if (path === '/caja/cortes') return 'Corte de Caja';

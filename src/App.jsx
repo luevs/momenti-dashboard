@@ -37,6 +37,10 @@ import TrabajoOCR from "./pages/TrabajoOCR";
 // TEMPORAL: Página de migración (ELIMINAR DESPUÉS DE USAR)
 import MigrationPage from "./pages/MigrationPage";
 
+// Módulo de Cotizaciones
+import { CotizacionesList, NuevaCotizacion, CotizacionDetail, CotizacionStats } from "./pages/Cotizaciones";
+import Cotizador from "./pages/Cotizador";
+
 // Componente para proteger rutas usando Supabase Auth session
 const PrivateRoute = ({ children }) => {
   // undefined = loading, null = not authenticated, object = session
@@ -196,6 +200,40 @@ function App() {
         <Route path="/migration" element={
           <PrivateRoute>
             <MigrationPage />
+          </PrivateRoute>
+        } />
+
+        {/* RUTAS DEL MÓDULO DE COTIZACIONES */}
+        <Route path="/cotizaciones" element={
+          <PrivateRoute>
+            <Layout><CotizacionesList /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/cotizaciones/nueva" element={
+          <PrivateRoute>
+            <Layout><NuevaCotizacion /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/cotizaciones/stats" element={
+          <PrivateRoute>
+            <Layout><CotizacionStats /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/cotizaciones/:id" element={
+          <PrivateRoute>
+            <Layout><CotizacionDetail /></Layout>
+          </PrivateRoute>
+        } />
+        <Route path="/cotizaciones/:id/editar" element={
+          <PrivateRoute>
+            <Layout><NuevaCotizacion /></Layout>
+          </PrivateRoute>
+        } />
+
+        {/* RUTA DEL COTIZADOR PÚBLICO */}
+        <Route path="/cotizador" element={
+          <PrivateRoute>
+            <Layout><Cotizador /></Layout>
           </PrivateRoute>
         } />
       </Routes>
