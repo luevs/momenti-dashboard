@@ -165,6 +165,11 @@ export default function ClientesLealtad() {
   const [viewMode, setViewMode] = useState('cards');
   const [showFilters, setShowFilters] = useState(false);
   const filtersRef = React.useRef(null);
+  
+  // Estados para filtros temporales y vista de movimientos
+  const [periodFilter, setPeriodFilter] = useState('hoy'); // 'hoy', 'ayer', 'semana', 'mes', 'todo'
+  const [showMovementsPanel, setShowMovementsPanel] = useState(false);
+  const [movementsData, setMovementsData] = useState([]);
 
   // Estados para el modal de registro por programa (faltaban, restaurados)
   const [registerMetersModalOpen, setRegisterMetersModalOpen] = useState(false);
@@ -1504,12 +1509,24 @@ export default function ClientesLealtad() {
       });
     }
 
-    // Filtrar por estado de programas (Activos/Históricos)
+    // Filtrar por estado de programas (Activos/Históricos/Sin Programas Activos)
     if (statusFilter !== 'Todos') {
       filtered = filtered.filter(customer => {
-        if (!customer.programs) return false;
+        if (!customer.programs) return statusFilter === 'Sin Programas Activos';
         
         let hasMatchingStatus = false;
+        const allPrograms = Object.values(customer.programs).flatMap(typePrograms => [
+          ...(typePrograms.active || []),
+          ...(typePrograms.historical || [])
+        ]);
+        
+        // Verificar si tiene algún programa activo con metros > 0
+        const hasActiveProgram = allPrograms.some(p => p.status === 'active' && p.remaining_meters > 0);
+        
+        if (statusFilter === 'Sin Programas Activos') {
+          return !hasActiveProgram;
+        }
+        
         Object.values(customer.programs).forEach(typePrograms => {
           if (statusFilter === 'Activos' && typePrograms.active?.length > 0) {
             hasMatchingStatus = true;
@@ -1557,7 +1574,11 @@ export default function ClientesLealtad() {
       historicalPrograms: 0,
       availableMeters: 0,
       totalMeters: 0,
-      totalCustomers: customersWithPrograms.length || 0
+      totalCustomers: customersWithPrograms.length || 0,
+      inactiveCustomers: 0,
+      // Métricas por producto
+      dtfMeters: { total: 0, consumed: 0, available: 0, activePrograms: 0 },
+      uvMeters: { total: 0, consumed: 0, available: 0, activePrograms: 0 }
     };
 
     customersWithPrograms.forEach(customer => {
@@ -1583,23 +1604,78 @@ export default function ClientesLealtad() {
 
         // Calcular metros disponibles (solo de activos)
         active.forEach(program => {
-          aggregates.availableMeters += Number(program?.remaining_meters) || 0;
-          aggregates.totalMeters += Number(program?.total_meters) || 0;
+          const remaining = Number(program?.remaining_meters) || 0;
+          const total = Number(program?.total_meters) || 0;
+          const consumed = total - remaining;
+          
+          aggregates.availableMeters += remaining;
+          aggregates.totalMeters += total;
+
+          // Métricas por tipo de producto
+          if (type === 'DTF Textil') {
+            aggregates.dtfMeters.total += total;
+            aggregates.dtfMeters.consumed += consumed;
+            aggregates.dtfMeters.available += remaining;
+            aggregates.dtfMeters.activePrograms += 1;
+          } else if (type === 'UV DTF') {
+            aggregates.uvMeters.total += total;
+            aggregates.uvMeters.consumed += consumed;
+            aggregates.uvMeters.available += remaining;
+            aggregates.uvMeters.activePrograms += 1;
+          }
         });
 
         // Sumar metros totales de históricos
         historical.forEach(program => {
-          aggregates.totalMeters += Number(program?.total_meters) || 0;
+          const total = Number(program?.total_meters) || 0;
+          aggregates.totalMeters += total;
+          
+          // Metros consumidos de históricos
+          if (type === 'DTF Textil') {
+            aggregates.dtfMeters.total += total;
+            aggregates.dtfMeters.consumed += total;
+          } else if (type === 'UV DTF') {
+            aggregates.uvMeters.total += total;
+            aggregates.uvMeters.consumed += total;
+          }
         });
       });
 
-      if (hasActiveProgram) aggregates.activeCustomers += 1;
+      if (hasActiveProgram) {
+        aggregates.activeCustomers += 1;
+      } else {
+        aggregates.inactiveCustomers += 1;
+      }
+      
       if (hasActiveDTF) aggregates.activeDTFCustomers += 1;
       if (hasActiveUV) aggregates.activeUVCustomers += 1;
     });
 
     return aggregates;
   }, [customersWithPrograms]);
+
+  const productCards = useMemo(() => ([
+    {
+      id: 'dtf',
+      label: 'DTF Textil',
+      total: Math.round(loyaltyStats.dtfMeters.total),
+      consumed: Math.round(loyaltyStats.dtfMeters.consumed),
+      available: Math.round(loyaltyStats.dtfMeters.available),
+      programs: loyaltyStats.dtfMeters.activePrograms,
+      border: 'border-blue-200',
+      progressColor: 'bg-gradient-to-r from-blue-500 to-blue-600'
+    },
+    {
+      id: 'uv',
+      label: 'UV DTF',
+      total: Math.round(loyaltyStats.uvMeters.total),
+      consumed: Math.round(loyaltyStats.uvMeters.consumed),
+      available: Math.round(loyaltyStats.uvMeters.available),
+      programs: loyaltyStats.uvMeters.activePrograms,
+      border: 'border-purple-200',
+      progressColor: 'bg-gradient-to-r from-purple-500 to-purple-600'
+    }
+  ]), [loyaltyStats]);
 
   const summaryCards = useMemo(() => ([
     {
@@ -1610,7 +1686,7 @@ export default function ClientesLealtad() {
       border: 'border-green-100',
       icon: <Users size={22} />,
       suffix: '',
-      description: `${loyaltyStats.activeDTFCustomers} DTF • ${loyaltyStats.activeUVCustomers} UV DTF`
+      description: `${loyaltyStats.activeDTFCustomers} DTF • ${loyaltyStats.activeUVCustomers} UV DTF • ${loyaltyStats.inactiveCustomers} inactivos`
     },
     {
       id: 'activePrograms',
@@ -1754,6 +1830,99 @@ export default function ClientesLealtad() {
     }
     setIsLoadingGlobalHistory(false);
   };
+
+  // Función para obtener movimientos filtrados por período
+  const fetchMovementsByPeriod = async (period = 'hoy') => {
+    setIsLoadingGlobalHistory(true);
+    
+    const now = new Date();
+    let startDate = new Date();
+    
+    switch(period) {
+      case 'hoy':
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'ayer':
+        startDate.setDate(now.getDate() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'semana':
+        startDate.setDate(now.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'mes':
+        startDate.setMonth(now.getMonth() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'todo':
+        startDate = new Date('2020-01-01');
+        break;
+    }
+
+    let query = supabase
+      .from('order_history')
+      .select('*')
+      .order('recorded_at', { ascending: false });
+
+    if (period === 'ayer') {
+      const endYesterday = new Date(startDate);
+      endYesterday.setDate(startDate.getDate() + 1);
+      endYesterday.setHours(0, 0, 0, 0);
+      query = query
+        .gte('recorded_at', startDate.toISOString())
+        .lt('recorded_at', endYesterday.toISOString());
+    } else if (period !== 'todo') {
+      query = query.gte('recorded_at', startDate.toISOString());
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error al obtener movimientos:', error);
+      setMovementsData([]);
+    } else {
+      setMovementsData(data || []);
+    }
+    
+    setIsLoadingGlobalHistory(false);
+  };
+
+  // Calcular estadísticas de movimientos
+  const movementsStats = useMemo(() => {
+    if (!movementsData || movementsData.length === 0) {
+      return {
+        totalMovements: 0,
+        totalMetersConsumed: 0,
+        dtfMetersConsumed: 0,
+        uvMetersConsumed: 0,
+        uniqueClients: 0
+      };
+    }
+
+    const uniqueClients = new Set(movementsData.map(m => m.customer_id)).size;
+    const totalMetersConsumed = movementsData.reduce((sum, m) => sum + (Number(m.meters_consumed) || 0), 0);
+    const dtfMetersConsumed = movementsData
+      .filter(m => m.type === 'DTF Textil')
+      .reduce((sum, m) => sum + (Number(m.meters_consumed) || 0), 0);
+    const uvMetersConsumed = movementsData
+      .filter(m => m.type === 'UV DTF')
+      .reduce((sum, m) => sum + (Number(m.meters_consumed) || 0), 0);
+
+    return {
+      totalMovements: movementsData.length,
+      totalMetersConsumed: Math.round(totalMetersConsumed),
+      dtfMetersConsumed: Math.round(dtfMetersConsumed),
+      uvMetersConsumed: Math.round(uvMetersConsumed),
+      uniqueClients
+    };
+  }, [movementsData]);
+
+  // Cargar movimientos cuando cambia el período
+  useEffect(() => {
+    if (showMovementsPanel) {
+      fetchMovementsByPeriod(periodFilter);
+    }
+  }, [periodFilter, showMovementsPanel]);
 
   useEffect(() => {
     if (globalHistoryModalOpen) {
@@ -1951,6 +2120,22 @@ export default function ClientesLealtad() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Clientes con Programa de Lealtad</h1>
         <div className="flex gap-2">
+          {/* Botón de movimientos */}
+          <button
+            onClick={() => {
+              setShowMovementsPanel(!showMovementsPanel);
+              if (!showMovementsPanel) fetchMovementsByPeriod(periodFilter);
+            }}
+            className={`flex items-center justify-center gap-2 px-4 py-2 rounded-full transition ${
+              showMovementsPanel 
+                ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                : 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+            }`}
+            title="Ver movimientos por período"
+          >
+            <Clock size={18} />
+            <span className="font-medium text-sm hidden sm:inline">Movimientos</span>
+          </button>
           {/* Botón de exportar */}
           <button
             onClick={exportCustomersToExcel}
@@ -1959,14 +2144,6 @@ export default function ClientesLealtad() {
           >
             <Download className="text-green-600" size={18} />
             <span className="text-green-600 font-medium text-sm hidden sm:inline">Exportar</span>
-          </button>
-          {/* Botón de historial global */}
-          <button
-            onClick={() => { setActiveTab("historial"); fetchGlobalHistory(); }}
-            className="flex items-center justify-center w-10 h-10 rounded-full bg-purple-100 hover:bg-purple-200 transition"
-            title="Ver historial global"
-          >
-            <History className="text-purple-600" size={22} />
           </button>
           {/* Botón de agregar cliente */}
           <button
@@ -2011,110 +2188,218 @@ export default function ClientesLealtad() {
         })}
       </div>
 
-      {/* Filtros y búsqueda */}
-      <div className="mb-6 space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div className="relative flex-1">
-            <Search size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Buscar cliente por nombre, ID, teléfono o email..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-4 text-sm shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+      {/* Tarjetas de métricas por producto */}
+      <div className="grid gap-4 mb-6 sm:grid-cols-2">
+        {productCards.map(card => {
+          const percentageConsumed = card.total > 0 ? Math.round((card.consumed / card.total) * 100) : 0;
+          
+          return (
+            <div
+              key={card.id}
+              className={`relative overflow-hidden rounded-2xl border ${card.border} bg-white p-5 shadow-sm`}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">{card.label}</h3>
+                <span className="text-xs font-medium px-3 py-1 rounded-full bg-gray-100 text-gray-600">
+                  {card.programs} programa{card.programs !== 1 ? 's' : ''} activo{card.programs !== 1 ? 's' : ''}
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Total vendido</div>
+                  <div className="text-xl font-bold text-gray-900">{card.total}m</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Consumido</div>
+                  <div className="text-xl font-bold text-amber-600">{card.consumed}m</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Disponible</div>
+                  <div className="text-xl font-bold text-green-600">{card.available}m</div>
+                </div>
+              </div>
+
+              {/* Barra de progreso */}
+              <div className="w-full bg-gray-200 rounded-full h-2.5">
+                <div 
+                  className={`${card.progressColor} h-2.5 rounded-full transition-all duration-300`}
+                  style={{ width: `${percentageConsumed}%` }}
+                ></div>
+              </div>
+              <div className="text-xs text-gray-500 mt-2 text-right">
+                {percentageConsumed}% consumido
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Panel de movimientos por período */}
+      {showMovementsPanel && (
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-6 mb-6 shadow-lg">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <Clock className="text-blue-600" size={24} />
+              Movimientos de Lealtad
+            </h2>
+            
+            {/* Filtros de período */}
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: 'hoy', label: 'Hoy' },
+                { value: 'ayer', label: 'Ayer' },
+                { value: 'semana', label: 'Semana' },
+                { value: 'mes', label: 'Mes' },
+                { value: 'todo', label: 'Todo' }
+              ].map(option => (
+                <button
+                  key={option.value}
+                  onClick={() => setPeriodFilter(option.value)}
+                  className={`px-4 py-2 rounded-lg font-medium text-sm transition ${
+                    periodFilter === option.value
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-white text-gray-700 hover:bg-blue-100'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 justify-between md:justify-end">
-            <div ref={filtersRef} className="relative">
-              <button
-                onClick={() => setShowFilters(prev => !prev)}
-                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                  showFilters ? 'border-blue-600 bg-blue-50 text-blue-600' : 'border-gray-200 text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                <SlidersHorizontal size={18} />
-                <span className="hidden sm:inline">Filtros</span>
-              </button>
+          {/* Estadísticas del período */}
+          {isLoadingGlobalHistory ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-4 mb-6 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-100">
+                  <div className="text-xs text-gray-500 mb-1">Total Movimientos</div>
+                  <div className="text-2xl font-bold text-blue-600">{movementsStats.totalMovements}</div>
+                </div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-purple-100">
+                  <div className="text-xs text-gray-500 mb-1">Metros Totales</div>
+                  <div className="text-2xl font-bold text-purple-600">{movementsStats.totalMetersConsumed}m</div>
+                </div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-cyan-100">
+                  <div className="text-xs text-gray-500 mb-1">DTF Textil</div>
+                  <div className="text-2xl font-bold text-cyan-600">{movementsStats.dtfMetersConsumed}m</div>
+                </div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-indigo-100">
+                  <div className="text-xs text-gray-500 mb-1">UV DTF</div>
+                  <div className="text-2xl font-bold text-indigo-600">{movementsStats.uvMetersConsumed}m</div>
+                </div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-green-100">
+                  <div className="text-xs text-gray-500 mb-1">Clientes únicos</div>
+                  <div className="text-2xl font-bold text-green-600">{movementsStats.uniqueClients}</div>
+                </div>
+              </div>
 
-              {showFilters && (
-                <div className="absolute right-0 z-20 mt-2 w-56 rounded-lg border border-gray-200 bg-white shadow-lg">
-                  <div className="p-2 space-y-1">
-                    <div className="px-3 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Tipo de Programa</div>
-                    {['Todos', 'DTF Textil', 'UV DTF'].map(type => (
-                      <button
-                        key={type}
-                        type="button"
-                        onClick={() => handleFilterSelect(type)}
-                        className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition ${
-                          selectedType === type && !showExpiringClients
-                            ? 'bg-blue-600 text-white shadow-sm'
-                            : 'text-gray-700 hover:bg-gray-100'
-                        }`}
-                      >
-                        {type}
-                      </button>
-                    ))}
-                    <div className="h-px bg-gray-100" />
-                    <div className="px-3 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Estado</div>
-                    {['Todos', 'Activos', 'Históricos'].map(status => (
-                      <button
-                        key={status}
-                        type="button"
-                        onClick={() => {
-                          setStatusFilter(status);
-                          setShowFilters(false);
-                        }}
-                        className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition ${
-                          statusFilter === status
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-gray-700 hover:bg-gray-100'
-                        }`}
-                      >
-                        {status}
-                      </button>
-                    ))}
-                    <div className="h-px bg-gray-100" />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowExpiringClients(prev => !prev);
-                        setShowFilters(false);
-                      }}
-                      className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition ${
-                        showExpiringClients
-                          ? 'bg-yellow-500 text-white shadow-sm'
-                          : 'text-gray-700 hover:bg-gray-100'
-                      }`}
-                    >
-                      A punto de expirar
-                      {showExpiringClients && <span className="text-xs font-semibold uppercase tracking-wide">Activo</span>}
-                    </button>
+              {/* Lista de movimientos */}
+              {movementsData.length === 0 ? (
+                <div className="bg-white rounded-xl p-8 text-center">
+                  <div className="text-4xl mb-2">📭</div>
+                  <p className="text-gray-600">No hay movimientos en este período</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="overflow-x-auto max-h-96">
+                    <table className="min-w-full">
+                      <thead className="bg-gray-50 sticky top-0">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Fecha/Hora</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Cliente</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Tipo</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Folio</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Metros</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Registrado por</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {movementsData.map((movement) => (
+                          <tr key={movement.id} className="hover:bg-gray-50 transition">
+                            <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">
+                              {formatDate(movement.recorded_at, { useUTC: true })}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900">{movement.client_name}</td>
+                            <td className="px-4 py-3 text-sm">
+                              <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                                movement.type === 'DTF Textil' 
+                                  ? 'bg-cyan-100 text-cyan-800' 
+                                  : 'bg-indigo-100 text-indigo-800'
+                              }`}>
+                                {movement.type || 'N/A'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm font-mono text-gray-600">{movement.program_folio || '—'}</td>
+                            <td className="px-4 py-3 text-sm font-semibold text-right text-gray-900">
+                              {Number(movement.meters_consumed || 0).toFixed(2)}m
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{movement.recorded_by || 'Sistema'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
-            </div>
+            </>
+          )}
+        </div>
+      )}
 
-            <div className="flex overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+      {/* Filtros y búsqueda - Compact Single Row */}
+      <div className="mb-4">
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar cliente..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Segmented Control: Tipo */}
+          <div className="flex rounded-lg border border-gray-200 bg-white overflow-hidden">
+            {['Todos', 'DTF Textil', 'UV DTF'].map(type => (
               <button
-                onClick={() => setViewMode('cards')}
-                className={`flex items-center gap-2 px-3 py-2 text-sm transition ${
-                  viewMode === 'cards' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+                key={type}
+                onClick={() => handleFilterSelect(type)}
+                className={`px-3 py-2 text-xs font-medium transition ${
+                  selectedType === type
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-600 hover:bg-gray-50'
                 }`}
               >
-                <LayoutGrid size={18} />
-                <span className="hidden sm:inline">Tarjetas</span>
+                {type === 'DTF Textil' ? 'DTF' : type === 'UV DTF' ? 'UV' : type}
               </button>
-              <button
-                onClick={() => setViewMode('table')}
-                className={`flex items-center gap-2 px-3 py-2 text-sm transition ${
-                  viewMode === 'table' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                <Table2 size={18} />
-                <span className="hidden sm:inline">Tabla</span>
-              </button>
-            </div>
+            ))}
+          </div>
+
+          {/* Segmented Control: View Mode */}
+          <div className="flex rounded-lg border border-gray-200 bg-white overflow-hidden">
+            <button
+              onClick={() => setViewMode('cards')}
+              className={`px-3 py-2 text-xs font-medium transition ${
+                viewMode === 'cards' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              Tarjetas
+            </button>
+            <button
+              onClick={() => setViewMode('table')}
+              className={`px-3 py-2 text-xs font-medium transition ${
+                viewMode === 'table' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              Lista
+            </button>
           </div>
         </div>
       </div>

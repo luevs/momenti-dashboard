@@ -1,4 +1,4 @@
-import { Printer, Plus, X, Eye, Play, Check, XCircle, RefreshCw } from "lucide-react";
+import { Printer, Plus, X, Eye, Play, Check, XCircle, RefreshCw, Clock, ChevronDown, ChevronUp } from "lucide-react";
 import MaquinaCard from '../components/MaquinaCard';
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
@@ -48,6 +48,16 @@ export default function Maquinas() {
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueError, setQueueError] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  
+  // Estados para scorecards
+  const [loyaltyMeters, setLoyaltyMeters] = useState({ dtf: 0, uv: 0 });
+  const [productionMeters, setProductionMeters] = useState({ dtf: 0, uv: 0 });
+
+  // Estados para movimientos
+  const [showMovementsPanel, setShowMovementsPanel] = useState(false);
+  const [periodFilter, setPeriodFilter] = useState('hoy');
+  const [movementsData, setMovementsData] = useState([]);
+  const [isLoadingMovements, setIsLoadingMovements] = useState(false);
 
   const navigate = useNavigate();
   const currentUser = useCurrentUser();
@@ -141,6 +151,153 @@ export default function Maquinas() {
   useEffect(() => {
     fetchQueues();
   }, [impresoras]);
+
+  // LÍNEAS 148-167: Fetch SOLO datos de HOY de Programas Lealtad desde order_history
+  const fetchLoyaltyMeters = async () => {
+    try {
+      // Sistema igual a clientes-lealtad: usar recorded_at con timestamp
+      const now = new Date();
+      const startDate = new Date();
+      startDate.setHours(0, 0, 0, 0); // Hoy a las 00:00:00
+      
+      const { data, error } = await supabase
+        .from('order_history')
+        .select('type, meters_consumed')
+        .gte('recorded_at', startDate.toISOString());
+      
+      if (error) return;
+
+      const dtf = (data || []).filter(l => l.type === 'DTF Textil').reduce((sum, l) => sum + (Number(l.meters_consumed) || 0), 0);
+      const uv = (data || []).filter(l => l.type === 'UV DTF').reduce((sum, l) => sum + (Number(l.meters_consumed) || 0), 0);
+
+      setLoyaltyMeters({ dtf: Math.round(dtf), uv: Math.round(uv) });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // LÍNEAS 171-190: Fetch totales de producción de HOY desde machine_daily_prints
+  const fetchMachineProduction = async () => {
+    try {
+      const today = getLocalDateString();
+      const { data, error } = await supabase
+        .from('machine_daily_prints')
+        .select('machine_id, meters_printed')
+        .eq('date', today);
+      
+      if (error) return;
+
+      // Machine IDs: 1 and 2 = DTF Textil, 3 = UV DTF
+      const dtfMachineIds = [1, 2];
+      const uvMachineIds = [3];
+
+      const dtf = (data || []).filter(m => dtfMachineIds.includes(m.machine_id)).reduce((sum, m) => sum + (Number(m.meters_printed) || 0), 0);
+      const uv = (data || []).filter(m => uvMachineIds.includes(m.machine_id)).reduce((sum, m) => sum + (Number(m.meters_printed) || 0), 0);
+
+      setProductionMeters({ dtf: Math.round(dtf), uv: Math.round(uv) });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Fetch movimientos de producción por período desde machine_daily_prints
+  const fetchMovementsByPeriod = async (period = 'hoy') => {
+    setIsLoadingMovements(true);
+    
+    const now = new Date();
+    let startDate = new Date();
+    
+    switch(period) {
+      case 'hoy':
+        startDate = getLocalDateString();
+        break;
+      case 'ayer':
+        const yesterday = new Date();
+        yesterday.setDate(now.getDate() - 1);
+        startDate = getLocalDateString(yesterday);
+        break;
+      case 'semana':
+        const weekAgo = new Date();
+        weekAgo.setDate(now.getDate() - 7);
+        startDate = getLocalDateString(weekAgo);
+        break;
+      case 'mes':
+        const monthAgo = new Date();
+        monthAgo.setMonth(now.getMonth() - 1);
+        startDate = getLocalDateString(monthAgo);
+        break;
+      case 'todo':
+        startDate = '2020-01-01';
+        break;
+    }
+
+    let query = supabase
+      .from('machine_daily_prints')
+      .select('*')
+      .order('date', { ascending: false });
+
+    if (period === 'ayer') {
+      query = query.eq('date', startDate);
+    } else if (period !== 'todo') {
+      query = query.gte('date', startDate);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error al obtener movimientos:', error);
+      setMovementsData([]);
+    } else {
+      setMovementsData(data || []);
+    }
+    
+    setIsLoadingMovements(false);
+  };
+
+  useEffect(() => {
+    fetchLoyaltyMeters();
+    fetchMachineProduction();
+  }, []);
+
+  // Cargar movimientos cuando cambia el período
+  useEffect(() => {
+    if (showMovementsPanel) {
+      fetchMovementsByPeriod(periodFilter);
+    }
+  }, [periodFilter, showMovementsPanel]);
+
+  // Calcular estadísticas de movimientos de producción
+  const movementsStats = React.useMemo(() => {
+    if (!movementsData || movementsData.length === 0) {
+      return {
+        totalRecords: 0,
+        totalMetersPrinted: 0,
+        dtfMetersPrinted: 0,
+        uvMetersPrinted: 0,
+        uniqueMachines: 0
+      };
+    }
+
+    const dtfMachineIds = [1, 2];
+    const uvMachineIds = [3];
+
+    const uniqueMachines = new Set(movementsData.map(m => m.machine_id)).size;
+    const totalMetersPrinted = movementsData.reduce((sum, m) => sum + (Number(m.meters_printed) || 0), 0);
+    const dtfMetersPrinted = movementsData
+      .filter(m => dtfMachineIds.includes(m.machine_id))
+      .reduce((sum, m) => sum + (Number(m.meters_printed) || 0), 0);
+    const uvMetersPrinted = movementsData
+      .filter(m => uvMachineIds.includes(m.machine_id))
+      .reduce((sum, m) => sum + (Number(m.meters_printed) || 0), 0);
+
+    return {
+      totalRecords: movementsData.length,
+      totalMetersPrinted: Math.round(totalMetersPrinted),
+      dtfMetersPrinted: Math.round(dtfMetersPrinted),
+      uvMetersPrinted: Math.round(uvMetersPrinted),
+      uniqueMachines
+    };
+  }, [movementsData]);
 
   const openQueueModal = async (machine) => {
     setQueueMachine(machine);
@@ -275,7 +432,9 @@ export default function Maquinas() {
 
     // actualizar UI localmente
     setLatestRecords(prev => ({ ...prev, [impresoraSeleccionada.id]: { ...payload } }));
-    await fetchTodayTotals(); // refresh today's totals
+    await fetchTodayTotals();
+    await fetchLoyaltyMeters();
+    await fetchMachineProduction();
     alert("Registro guardado");
     setRegistroModalOpen(false);
     setMetrosHoy("");
@@ -318,6 +477,8 @@ export default function Maquinas() {
           }
         }
       }
+      await fetchLoyaltyMeters();
+      await fetchMachineProduction();
       alert("Corte diario guardado");
       setCorteModalOpen(false);
       setCorteMetros({});
@@ -343,6 +504,177 @@ export default function Maquinas() {
             Agregar impresora
           </button>
         </div>
+      </div>
+
+      {/* LÍNEAS 409-465: Scorecards de Producción */}
+      <div className="grid gap-4 mb-6 sm:grid-cols-1 lg:grid-cols-3">
+        {/* DTF Textil Total */}
+        <div className="relative overflow-hidden rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-700">DTF Textil</h3>
+          </div>
+          <div className="text-3xl font-bold text-blue-600 mb-1">
+            {productionMeters.dtf.toLocaleString()}m
+          </div>
+          <div className="text-xs text-gray-500">
+            Metros impresos hoy
+          </div>
+        </div>
+
+        {/* UV DTF Total */}
+        <div className="relative overflow-hidden rounded-2xl border border-purple-200 bg-gradient-to-br from-purple-50 to-white p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-700">UV DTF</h3>
+          </div>
+          <div className="text-3xl font-bold text-purple-600 mb-1">
+            {productionMeters.uv.toLocaleString()}m
+          </div>
+          <div className="text-xs text-gray-500">
+            Metros impresos hoy
+          </div>
+        </div>
+
+        {/* Programas Lealtad */}
+        <div className="relative overflow-hidden rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-700">Programas Lealtad</h3>
+          </div>
+          <div className="text-3xl font-bold text-indigo-600 mb-1">
+            {(loyaltyMeters.dtf + loyaltyMeters.uv).toLocaleString()}m
+          </div>
+          <div className="text-xs text-gray-500 space-y-1">
+            <div className="flex justify-between">
+              <span>DTF:</span>
+              <span className="font-medium">{loyaltyMeters.dtf.toLocaleString()}m</span>
+            </div>
+            <div className="flex justify-between">
+              <span>UV:</span>
+              <span className="font-medium">{loyaltyMeters.uv.toLocaleString()}m</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Sección de Movimientos de Producción */}
+      <div className="mb-6">
+        <button
+          onClick={() => setShowMovementsPanel(!showMovementsPanel)}
+          className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl hover:shadow-md transition-all"
+        >
+          <div className="flex items-center gap-3">
+            <Clock className="text-indigo-600" size={24} />
+            <div className="text-left">
+              <h2 className="text-lg font-semibold text-gray-800">Registros de Producción</h2>
+              <p className="text-sm text-gray-600">Consulta el historial de metros registrados</p>
+            </div>
+          </div>
+          {showMovementsPanel ? <ChevronUp className="text-indigo-600" size={24} /> : <ChevronDown className="text-indigo-600" size={24} />}
+        </button>
+
+        {showMovementsPanel && (
+          <div className="mt-4 bg-white rounded-xl border border-gray-200 shadow-sm">
+            {/* Filtros de período */}
+            <div className="p-4 border-b border-gray-200">
+              <div className="flex gap-2 flex-wrap">
+                {[
+                  { value: 'hoy', label: 'Hoy' },
+                  { value: 'ayer', label: 'Ayer' },
+                  { value: 'semana', label: 'Semana' },
+                  { value: 'mes', label: 'Mes' },
+                  { value: 'todo', label: 'Todo' }
+                ].map(period => (
+                  <button
+                    key={period.value}
+                    onClick={() => setPeriodFilter(period.value)}
+                    className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                      periodFilter === period.value
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {period.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Estadísticas resumen */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 p-4 bg-gray-50 border-b border-gray-200">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-indigo-600">{movementsStats.totalRecords}</div>
+                <div className="text-xs text-gray-600">Total Registros</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-purple-600">{movementsStats.totalMetersPrinted.toLocaleString()}m</div>
+                <div className="text-xs text-gray-600">Metros Totales</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-blue-600">{movementsStats.dtfMetersPrinted.toLocaleString()}m</div>
+                <div className="text-xs text-gray-600">DTF Textil</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-purple-600">{movementsStats.uvMetersPrinted.toLocaleString()}m</div>
+                <div className="text-xs text-gray-600">UV DTF</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-600">{movementsStats.uniqueMachines}</div>
+                <div className="text-xs text-gray-600">Máquinas</div>
+              </div>
+            </div>
+
+            {/* Tabla de movimientos */}
+            <div className="p-4">
+              {isLoadingMovements ? (
+                <div className="text-center py-8 text-gray-500">Cargando registros...</div>
+              ) : movementsData.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">No hay registros en este período</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-left text-sm font-semibold text-gray-700">
+                        <th className="pb-3">Fecha</th>
+                        <th className="pb-3">Máquina</th>
+                        <th className="pb-3">Metros</th>
+                        <th className="pb-3">Registrado por</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {movementsData.map((movement, idx) => {
+                        const machine = impresoras.find(i => i.id === movement.machine_id);
+                        const machineName = machine?.nombre || `Máquina ${movement.machine_id}`;
+                        const isDTF = [1, 2].includes(movement.machine_id);
+                        
+                        return (
+                          <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                            <td className="py-3 text-sm text-gray-600">
+                              {new Date(movement.date + 'T00:00:00').toLocaleDateString('es-MX', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric'
+                              })}
+                            </td>
+                            <td className="py-3">
+                              <span className={`inline-block px-2 py-1 text-xs font-medium rounded ${
+                                isDTF
+                                  ? 'bg-blue-100 text-blue-800' 
+                                  : 'bg-purple-100 text-purple-800'
+                              }`}>
+                                {machineName}
+                              </span>
+                            </td>
+                            <td className="py-3 text-sm font-semibold text-indigo-600">{Number(movement.meters_printed).toFixed(2)}m</td>
+                            <td className="py-3 text-sm text-gray-600">{movement.registered_by || 'Sistema'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">

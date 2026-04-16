@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calculator, Package, Ruler, DollarSign, Copy, RotateCw, AlertCircle, CheckCircle, Info, Home, LogIn, Menu, X, Plus, Trash2, ShoppingCart } from 'lucide-react';
+import { Calculator, Package, Ruler, DollarSign, Copy, RotateCw, AlertCircle, CheckCircle, Info, Home, LogIn, Menu, X, Plus, Trash2, ShoppingCart, Edit2, Table } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
   MATERIALS,
@@ -8,6 +8,7 @@ import {
   getDTFUVPrice,
   getPapelAdhesivoWithLayout
 } from '../utils/pricingData';
+import { usePricingSettings } from '../utils/usePricingSettings';
 import {
   calculateLayout,
   calculateVinylM2,
@@ -351,8 +352,504 @@ const LoyaltyComparison = ({ loyaltyOptions }) => {
   );
 };
 
+const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
+  const [showTable, setShowTable] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [tempPrices, setTempPrices] = useState(customPrices);
+
+  const clientTypeLabels = {
+    elite: '👑 Elite (-15%)',
+    pro: '🏢 Pro/Printer (Base)',
+    cf: '💰 CF (+15%)'
+  };
+
+  useEffect(() => {
+    setTempPrices(customPrices);
+  }, [customPrices]);
+
+  const handlePriceEdit = (category, path, value) => {
+    // path puede ser algo como 'elite.fraction' o 'impreso.pro.below05'
+    const keys = path.split('.');
+    
+    setTempPrices(prev => {
+      const newCategory = { ...prev[category] };
+      let current = newCategory;
+      
+      // Navegar hasta el penúltimo nivel
+      for (let i = 0; i < keys.length - 1; i++) {
+        current[keys[i]] = { ...current[keys[i]] };
+        current = current[keys[i]];
+      }
+      
+      // Actualizar el último nivel
+      current[keys[keys.length - 1]] = parseFloat(value) || 0;
+      
+      return {
+        ...prev,
+        [category]: newCategory
+      };
+    });
+  };
+
+  const handleSave = () => {
+    onPricesChange(tempPrices);
+    setEditMode(false);
+  };
+
+  const handleCancel = () => {
+    setTempPrices(customPrices);
+    setEditMode(false);
+  };
+
+  const PriceCell = ({ value, onChange, color = "text-gray-800" }) => {
+    if (editMode) {
+      return (
+        <input
+          type="number"
+          value={value || ''}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full px-2 py-1 border border-cyan-300 rounded text-right font-semibold focus:outline-none focus:ring-2 focus:ring-cyan-500"
+          step="0.01"
+        />
+      );
+    }
+    return <span className={`font-semibold ${color}`}>${value || '-'}</span>;
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+      <button
+        onClick={() => setShowTable(!showTable)}
+        className="w-full flex items-center justify-between mb-3 hover:bg-gray-50 p-2 rounded transition-colors"
+      >
+        <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+          <Table className="text-cyan-500" size={20} />
+          Tabla de Precios - {clientTypeLabels[clientType]} {editMode ? '(Editando)' : '(Click para ver/editar)'}
+        </h3>
+        <div className="flex items-center gap-2">
+          {showTable && (
+            <div className="flex gap-2 mr-2">
+              {editMode ? (
+                <>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleSave(); }}
+                    className="px-3 py-1 text-sm bg-green-500 hover:bg-green-600 text-white rounded transition-colors"
+                  >
+                    Guardar
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleCancel(); }}
+                    className="px-3 py-1 text-sm bg-gray-300 hover:bg-gray-400 text-gray-700 rounded transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setEditMode(true); }}
+                  className="px-3 py-1 text-sm bg-cyan-500 hover:bg-cyan-600 text-white rounded transition-colors flex items-center gap-1"
+                >
+                  <Edit2 size={14} />
+                  Editar Precios
+                </button>
+              )}
+            </div>
+          )}
+          <span className="text-sm text-gray-500">
+            {showTable ? '▼' : '▶'}
+          </span>
+        </div>
+      </button>
+
+      {showTable && (
+        <div className="space-y-6 mt-4">
+          {/* DTF Textil */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+              📏 DTF Textil (58cm)
+            </h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="py-2 px-3 text-left">Cantidad</th>
+                    <th className="py-2 px-3 text-right">Precio/Metro</th>
+                    <th className="py-2 px-3 text-right">Total (Paq.)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  <tr>
+                    <td className="py-2 px-3">Menos de 0.5m</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.dtfTextil[clientType].fraction}
+                        onChange={(val) => handlePriceEdit('dtfTextil', `${clientType}.fraction`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right text-gray-400">-</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3">0.5m - 9.99m</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.dtfTextil[clientType].fullMeter}
+                        onChange={(val) => handlePriceEdit('dtfTextil', `${clientType}.fullMeter`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right text-gray-400">-</td>
+                  </tr>
+                  <tr className="bg-green-50">
+                    <td className="py-2 px-3 font-semibold">10m (Lealtad)</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.dtfTextil[clientType].loyalty10}
+                        onChange={(val) => handlePriceEdit('dtfTextil', `${clientType}.loyalty10`, val)}
+                        color="text-green-600"
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right text-green-600 font-semibold">
+                      ${(tempPrices.dtfTextil[clientType].loyalty10 * 10).toFixed(2)}
+                    </td>
+                  </tr>
+                  <tr className="bg-green-50">
+                    <td className="py-2 px-3 font-semibold">20m (Lealtad)</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.dtfTextil[clientType].loyalty20}
+                        onChange={(val) => handlePriceEdit('dtfTextil', `${clientType}.loyalty20`, val)}
+                        color="text-green-600"
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right text-green-600 font-semibold">
+                      ${(tempPrices.dtfTextil[clientType].loyalty20 * 20).toFixed(2)}
+                    </td>
+                  </tr>
+                  <tr className="bg-green-50">
+                    <td className="py-2 px-3 font-semibold">50m (Lealtad)</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.dtfTextil[clientType].loyalty50}
+                        onChange={(val) => handlePriceEdit('dtfTextil', `${clientType}.loyalty50`, val)}
+                        color="text-green-600"
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right text-green-600 font-semibold">
+                      ${(tempPrices.dtfTextil[clientType].loyalty50 * 50).toFixed(2)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* DTF UV */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+              🌞 DTF UV (28cm)
+            </h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="py-2 px-3 text-left">Cantidad</th>
+                    <th className="py-2 px-3 text-right">Precio/Metro</th>
+                    <th className="py-2 px-3 text-right">Total (Paq.)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  <tr>
+                    <td className="py-2 px-3">Regular</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.dtfUV[clientType].regular}
+                        onChange={(val) => handlePriceEdit('dtfUV', `${clientType}.regular`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right text-gray-400">-</td>
+                  </tr>
+                  <tr className="bg-green-50">
+                    <td className="py-2 px-3 font-semibold">10m (Lealtad)</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.dtfUV[clientType].loyalty10}
+                        onChange={(val) => handlePriceEdit('dtfUV', `${clientType}.loyalty10`, val)}
+                        color="text-green-600"
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right text-green-600 font-semibold">
+                      ${(tempPrices.dtfUV[clientType].loyalty10 * 10).toFixed(2)}
+                    </td>
+                  </tr>
+                  <tr className="bg-green-50">
+                    <td className="py-2 px-3 font-semibold">20m (Lealtad)</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.dtfUV[clientType].loyalty20}
+                        onChange={(val) => handlePriceEdit('dtfUV', `${clientType}.loyalty20`, val)}
+                        color="text-green-600"
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right text-green-600 font-semibold">
+                      ${(tempPrices.dtfUV[clientType].loyalty20 * 20).toFixed(2)}
+                    </td>
+                  </tr>
+                  <tr className="bg-green-50">
+                    <td className="py-2 px-3 font-semibold">50m (Lealtad)</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.dtfUV[clientType].loyalty50}
+                        onChange={(val) => handlePriceEdit('dtfUV', `${clientType}.loyalty50`, val)}
+                        color="text-green-600"
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right text-green-600 font-semibold">
+                      ${(tempPrices.dtfUV[clientType].loyalty50 * 50).toFixed(2)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Viniles */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+              🎨 Viniles (1.4m ancho)
+            </h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="py-2 px-3 text-left">Tipo</th>
+                    <th className="py-2 px-3 text-right">&lt;0.5m²</th>
+                    <th className="py-2 px-3 text-right">Regular</th>
+                    <th className="py-2 px-3 text-right">+8m²</th>
+                    <th className="py-2 px-3 text-right">Mínimo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  <tr>
+                    <td className="py-2 px-3 font-semibold">Impreso</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.impreso[clientType].below05}
+                        onChange={(val) => handlePriceEdit('viniles', `impreso.${clientType}.below05`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.impreso[clientType].regular}
+                        onChange={(val) => handlePriceEdit('viniles', `impreso.${clientType}.regular`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.impreso[clientType].above8}
+                        onChange={(val) => handlePriceEdit('viniles', `impreso.${clientType}.above8`, val)}
+                        color="text-green-600"
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.impreso[clientType].minimum}
+                        onChange={(val) => handlePriceEdit('viniles', `impreso.${clientType}.minimum`, val)}
+                        color="text-orange-600"
+                      />
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold">Suajado</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.suajado[clientType].below05}
+                        onChange={(val) => handlePriceEdit('viniles', `suajado.${clientType}.below05`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.suajado[clientType].regular}
+                        onChange={(val) => handlePriceEdit('viniles', `suajado.${clientType}.regular`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.suajado[clientType].above8}
+                        onChange={(val) => handlePriceEdit('viniles', `suajado.${clientType}.above8`, val)}
+                        color="text-green-600"
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.suajado[clientType].minimum}
+                        onChange={(val) => handlePriceEdit('viniles', `suajado.${clientType}.minimum`, val)}
+                        color="text-orange-600"
+                      />
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold">Microperforado</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.microperforado[clientType].below05}
+                        onChange={(val) => handlePriceEdit('viniles', `microperforado.${clientType}.below05`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.microperforado[clientType].regular}
+                        onChange={(val) => handlePriceEdit('viniles', `microperforado.${clientType}.regular`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.microperforado[clientType].above8}
+                        onChange={(val) => handlePriceEdit('viniles', `microperforado.${clientType}.above8`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.microperforado[clientType].minimum}
+                        onChange={(val) => handlePriceEdit('viniles', `microperforado.${clientType}.minimum`, val)}
+                        color="text-orange-600"
+                      />
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold">Holográfico</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.holografico[clientType].below05}
+                        onChange={(val) => handlePriceEdit('viniles', `holografico.${clientType}.below05`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.holografico[clientType].regular}
+                        onChange={(val) => handlePriceEdit('viniles', `holografico.${clientType}.regular`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.holografico[clientType].above8}
+                        onChange={(val) => handlePriceEdit('viniles', `holografico.${clientType}.above8`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.holografico[clientType].minimum}
+                        onChange={(val) => handlePriceEdit('viniles', `holografico.${clientType}.minimum`, val)}
+                        color="text-orange-600"
+                      />
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold">Lona</td>
+                    <td className="py-2 px-3 text-right">-</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.lona[clientType].regular}
+                        onChange={(val) => handlePriceEdit('viniles', `lona.${clientType}.regular`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.viniles.lona[clientType].above8}
+                        onChange={(val) => handlePriceEdit('viniles', `lona.${clientType}.above8`, val)}
+                        color="text-green-600"
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">-</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Papel Adhesivo */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+              📄 Papel Adhesivo Suajado (31×46cm)
+            </h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="py-2 px-3 text-left">Cortes por Hoja</th>
+                    <th className="py-2 px-3 text-right">Precio/Hoja</th>
+                    <th className="py-2 px-3 text-right">Mínimo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  <tr>
+                    <td className="py-2 px-3">0 - 40 cortes</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.papel[clientType].range1.price}
+                        onChange={(val) => handlePriceEdit('papel', `${clientType}.range1.price`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.papel[clientType].range1.minimum}
+                        onChange={(val) => handlePriceEdit('papel', `${clientType}.range1.minimum`, val)}
+                        color="text-orange-600"
+                      />
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3">41 - 70 cortes</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.papel[clientType].range2.price}
+                        onChange={(val) => handlePriceEdit('papel', `${clientType}.range2.price`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.papel[clientType].range2.minimum}
+                        onChange={(val) => handlePriceEdit('papel', `${clientType}.range2.minimum`, val)}
+                        color="text-orange-600"
+                      />
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3">71+ cortes</td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.papel[clientType].range3.price}
+                        onChange={(val) => handlePriceEdit('papel', `${clientType}.range3.price`, val)}
+                      />
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <PriceCell 
+                        value={tempPrices.papel[clientType].range3.minimum}
+                        onChange={(val) => handlePriceEdit('papel', `${clientType}.range3.minimum`, val)}
+                        color="text-orange-600"
+                      />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p className="text-xs text-gray-500 mt-2">* Mínimo de 5 hojas por pedido</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ResultsPanel = ({ results, copied, handleCopyToClipboard, handleReset, onAddToList }) => {
   const [showPapelDistribution, setShowPapelDistribution] = useState(false);
+  const [isEditingPrice, setIsEditingPrice] = useState(false);
+  const [customPrice, setCustomPrice] = useState('');
+  
+  useEffect(() => {
+    if (results && !results.error) {
+      setCustomPrice((results.total || results.price || 0).toString());
+      setIsEditingPrice(false);
+    }
+  }, [results]);
   
   if (!results) return null;
 
@@ -368,6 +865,29 @@ const ResultsPanel = ({ results, copied, handleCopyToClipboard, handleReset, onA
     );
   }
 
+  const handlePriceChange = (e) => {
+    const value = e.target.value;
+    if (value === '' || /^\d*\.?\d*$/.test(value)) {
+      setCustomPrice(value);
+    }
+  };
+
+  const handleAddWithCustomPrice = () => {
+    const price = parseFloat(customPrice) || (results.total || results.price || 0);
+    const itemWithCustomPrice = {
+      ...results,
+      originalPrice: results.total || results.price,
+      total: results.total ? price : undefined,
+      price: results.price ? price : undefined,
+      customPriceApplied: Math.abs(price - (results.total || results.price || 0)) > 0.01
+    };
+    onAddToList(itemWithCustomPrice);
+  };
+
+  const displayPrice = parseFloat(customPrice) || (results.total || results.price || 0);
+  const originalPrice = results.total || results.price || 0;
+  const priceChanged = Math.abs(displayPrice - originalPrice) > 0.01;
+
   return (
     <div className="bg-white rounded-lg shadow-lg p-6">
       <div className="flex items-center justify-between mb-4">
@@ -377,7 +897,7 @@ const ResultsPanel = ({ results, copied, handleCopyToClipboard, handleReset, onA
         </h2>
         <div className="flex gap-2">
           <button
-            onClick={onAddToList}
+            onClick={handleAddWithCustomPrice}
             className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors flex items-center gap-2"
           >
             <Plus size={18} />
@@ -441,20 +961,68 @@ const ResultsPanel = ({ results, copied, handleCopyToClipboard, handleReset, onA
               </div>
               
               <div>
-                <span className="text-gray-700 flex items-center gap-1 mb-1">
+                <span className="text-gray-700 flex items-center gap-1 mb-2">
                   <DollarSign size={16} />
                   Precio:
                 </span>
-                <p className="text-3xl font-bold text-cyan-600">
-                  {formatPrice(results.price)}
-                </p>
+                {isEditingPrice ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600">$</span>
+                      <input
+                        type="text"
+                        value={customPrice}
+                        onChange={handlePriceChange}
+                        className="w-full px-3 py-2 border-2 border-cyan-500 rounded-lg text-2xl font-bold text-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setIsEditingPrice(false)}
+                        className="px-3 py-1 text-xs bg-green-500 hover:bg-green-600 text-white rounded transition-colors"
+                      >
+                        Confirmar
+                      </button>
+                      <button
+                        onClick={() => {
+                          setCustomPrice(originalPrice.toString());
+                          setIsEditingPrice(false);
+                        }}
+                        className="px-3 py-1 text-xs bg-gray-300 hover:bg-gray-400 text-gray-700 rounded transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className={`text-3xl font-bold ${priceChanged ? 'text-green-600' : 'text-cyan-600'}`}>
+                        {formatPrice(displayPrice)}
+                      </p>
+                      <button
+                        onClick={() => setIsEditingPrice(true)}
+                        className="p-1 text-gray-400 hover:text-cyan-600 hover:bg-cyan-50 rounded transition-colors"
+                        title="Editar precio"
+                      >
+                        <Edit2 size={18} />
+                      </button>
+                    </div>
+                    {priceChanged && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Original: {formatPrice(originalPrice)}
+                      </p>
+                    )}
+                  </div>
+                )}
                 {results.pricePerMeter && (
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-gray-600 mt-1">
                     {formatPrice(results.pricePerMeter)} por metro
                   </p>
                 )}
                 {results.pricePerM2 && (
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-gray-600 mt-1">
                     {formatPrice(results.pricePerM2)} por m²
                   </p>
                 )}
@@ -501,14 +1069,62 @@ const ResultsPanel = ({ results, copied, handleCopyToClipboard, handleReset, onA
               </div>
               
               <div>
-                <span className="text-gray-700 flex items-center gap-1 mb-1">
+                <span className="text-gray-700 flex items-center gap-1 mb-2">
                   <DollarSign size={16} />
                   Precio:
                 </span>
-                <p className="text-3xl font-bold text-cyan-600">
-                  {formatPrice(results.price)}
-                </p>
-                <p className="text-sm text-gray-600">
+                {isEditingPrice ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600">$</span>
+                      <input
+                        type="text"
+                        value={customPrice}
+                        onChange={handlePriceChange}
+                        className="w-full px-3 py-2 border-2 border-cyan-500 rounded-lg text-2xl font-bold text-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setIsEditingPrice(false)}
+                        className="px-3 py-1 text-xs bg-green-500 hover:bg-green-600 text-white rounded transition-colors"
+                      >
+                        Confirmar
+                      </button>
+                      <button
+                        onClick={() => {
+                          setCustomPrice(originalPrice.toString());
+                          setIsEditingPrice(false);
+                        }}
+                        className="px-3 py-1 text-xs bg-gray-300 hover:bg-gray-400 text-gray-700 rounded transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className={`text-3xl font-bold ${priceChanged ? 'text-green-600' : 'text-cyan-600'}`}>
+                        {formatPrice(displayPrice)}
+                      </p>
+                      <button
+                        onClick={() => setIsEditingPrice(true)}
+                        className="p-1 text-gray-400 hover:text-cyan-600 hover:bg-cyan-50 rounded transition-colors"
+                        title="Editar precio"
+                      >
+                        <Edit2 size={18} />
+                      </button>
+                    </div>
+                    {priceChanged && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Original: {formatPrice(originalPrice)}
+                      </p>
+                    )}
+                  </div>
+                )}
+                <p className="text-sm text-gray-600 mt-1">
                   {formatPrice(results.pricePerMeter)} por metro
                 </p>
               </div>
@@ -640,13 +1256,61 @@ const ResultsPanel = ({ results, copied, handleCopyToClipboard, handleReset, onA
               </div>
               
               <div>
-                <span className="text-gray-700 flex items-center gap-1 mb-1">
+                <span className="text-gray-700 flex items-center gap-1 mb-2">
                   <DollarSign size={16} />
                   Precio total:
                 </span>
-                <p className="text-3xl font-bold text-pink-600">
-                  {formatPrice(results.total)}
-                </p>
+                {isEditingPrice ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600">$</span>
+                      <input
+                        type="text"
+                        value={customPrice}
+                        onChange={handlePriceChange}
+                        className="w-full px-3 py-2 border-2 border-pink-500 rounded-lg text-2xl font-bold text-pink-600 focus:outline-none focus:ring-2 focus:ring-pink-500"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setIsEditingPrice(false)}
+                        className="px-3 py-1 text-xs bg-green-500 hover:bg-green-600 text-white rounded transition-colors"
+                      >
+                        Confirmar
+                      </button>
+                      <button
+                        onClick={() => {
+                          setCustomPrice(originalPrice.toString());
+                          setIsEditingPrice(false);
+                        }}
+                        className="px-3 py-1 text-xs bg-gray-300 hover:bg-gray-400 text-gray-700 rounded transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className={`text-3xl font-bold ${priceChanged ? 'text-green-600' : 'text-pink-600'}`}>
+                        {formatPrice(displayPrice)}
+                      </p>
+                      <button
+                        onClick={() => setIsEditingPrice(true)}
+                        className="p-1 text-gray-400 hover:text-pink-600 hover:bg-pink-50 rounded transition-colors"
+                        title="Editar precio"
+                      >
+                        <Edit2 size={18} />
+                      </button>
+                    </div>
+                    {priceChanged && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Original: {formatPrice(originalPrice)}
+                      </p>
+                    )}
+                  </div>
+                )}
                 {results.minimumApplied && (
                   <p className="text-xs text-orange-600 mt-1">
                     * Mínimo aplicado: {formatPrice(results.minimum)}
@@ -772,6 +1436,11 @@ const QuotedItemsList = ({ items, onRemoveItem, onClearAll, onCopyAll }) => {
                     <p className="font-bold text-green-600 text-lg">
                       {formatPrice(item.total || item.price)}
                     </p>
+                    {item.customPriceApplied && item.originalPrice && (
+                      <p className="text-xs text-gray-500">
+                        Original: {formatPrice(item.originalPrice)}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -825,6 +1494,18 @@ const Cotizador = () => {
   
   // Estado para lista de cotizaciones
   const [quotedItems, setQuotedItems] = useState([]);
+  
+  // Estado para tipo de cliente
+  const [clientType, setClientType] = useState('pro'); // 'elite', 'pro', 'cf'
+  
+  // Hook para cargar y guardar precios personalizados en Supabase
+  const { 
+    customPrices, 
+    setCustomPrices, 
+    isLoading: pricesLoading, 
+    error: pricesError,
+    reloadPrices 
+  } = usePricingSettings();
 
   const handleInputChange = useCallback((e) => {
     const { name, value } = e.target;
@@ -832,6 +1513,145 @@ const Cotizador = () => {
       setFormData(prev => ({ ...prev, [name]: value }));
     }
   }, []);
+
+  // Funciones de cálculo de precios con customPrices
+  const getCustomDTFTextilPrice = useCallback((meters) => {
+    const prices = customPrices.dtfTextil[clientType];
+    
+    if (meters < 0.5) {
+      return {
+        type: 'fraction',
+        pricePerMeter: prices.fraction,
+        total: prices.fraction * meters,
+        meters
+      };
+    } else {
+      // Determinar precio por nivel de metros
+      let pricePerMeter = prices.fullMeter;
+      let loyaltyTier = null;
+      
+      if (meters >= 50) {
+        pricePerMeter = prices.loyalty50;
+        loyaltyTier = 50;
+      } else if (meters >= 20) {
+        pricePerMeter = prices.loyalty20;
+        loyaltyTier = 20;
+      } else if (meters >= 10) {
+        pricePerMeter = prices.loyalty10;
+        loyaltyTier = 10;
+      }
+      
+      return {
+        type: loyaltyTier ? 'loyalty' : 'regular',
+        pricePerMeter,
+        total: pricePerMeter * meters,
+        meters,
+        loyaltyTier,
+        loyaltyOptions: [
+          { meters: 10, pricePerMeter: prices.loyalty10, total: prices.loyalty10 * 10 },
+          { meters: 20, pricePerMeter: prices.loyalty20, total: prices.loyalty20 * 20 },
+          { meters: 50, pricePerMeter: prices.loyalty50, total: prices.loyalty50 * 50 },
+        ].filter(option => option.meters !== loyaltyTier)
+      };
+    }
+  }, [customPrices, clientType]);
+
+  const getCustomDTFUVPrice = useCallback((meters) => {
+    const prices = customPrices.dtfUV[clientType];
+    let pricePerMeter = prices.regular;
+    let loyaltyTier = null;
+    
+    if (meters >= 50) {
+      pricePerMeter = prices.loyalty50;
+      loyaltyTier = 50;
+    } else if (meters >= 20) {
+      pricePerMeter = prices.loyalty20;
+      loyaltyTier = 20;
+    } else if (meters >= 10) {
+      pricePerMeter = prices.loyalty10;
+      loyaltyTier = 10;
+    }
+    
+    return {
+      type: loyaltyTier ? 'loyalty' : 'regular',
+      pricePerMeter,
+      total: pricePerMeter * meters,
+      meters,
+      loyaltyTier,
+      loyaltyOptions: [
+        { meters: 10, pricePerMeter: prices.loyalty10, total: prices.loyalty10 * 10 },
+        { meters: 20, pricePerMeter: prices.loyalty20, total: prices.loyalty20 * 20 },
+        { meters: 50, pricePerMeter: prices.loyalty50, total: prices.loyalty50 * 50 },
+      ].filter(option => option.meters !== loyaltyTier)
+    };
+  }, [customPrices, clientType]);
+
+  const getCustomVinylPrice = useCallback((type, m2) => {
+    const vinyl = customPrices.viniles[type]?.[clientType];
+    if (!vinyl) return null;
+
+    let pricePerM2;
+    
+    if (m2 < 0.5 && vinyl.below05) {
+      pricePerM2 = vinyl.below05;
+    } else if (m2 >= 8 && vinyl.above8) {
+      pricePerM2 = vinyl.above8;
+    } else {
+      pricePerM2 = vinyl.regular;
+    }
+
+    const subtotal = pricePerM2 * m2;
+    const total = vinyl.minimum && subtotal < vinyl.minimum ? vinyl.minimum : subtotal;
+
+    return {
+      pricePerM2,
+      subtotal,
+      minimum: vinyl.minimum,
+      total,
+      minimumApplied: total > subtotal
+    };
+  }, [customPrices, clientType]);
+
+  const getCustomPapelAdhesivoWithLayout = useCallback((cutsPerSheet, sheets) => {
+    const material = MATERIALS.PAPEL_ADHESIVO;
+    
+    if (sheets < material.minimumSheets) {
+      return {
+        error: true,
+        message: `Pedido mínimo de ${material.minimumSheets} plantillas`,
+        minimumSheets: material.minimumSheets
+      };
+    }
+
+    const prices = customPrices.papel[clientType];
+    let pricePerSheet;
+    let minimum;
+
+    if (cutsPerSheet >= 0 && cutsPerSheet <= 40) {
+      pricePerSheet = prices.range1.price;
+      minimum = prices.range1.minimum;
+    } else if (cutsPerSheet >= 41 && cutsPerSheet <= 70) {
+      pricePerSheet = prices.range2.price;
+      minimum = prices.range2.minimum;
+    } else {
+      pricePerSheet = prices.range3.price;
+      minimum = prices.range3.minimum;
+    }
+
+    const subtotal = pricePerSheet * sheets;
+    const total = subtotal < minimum ? minimum : subtotal;
+
+    return {
+      pricePerSheet,
+      sheets,
+      cutsPerSheet,
+      totalCuts: cutsPerSheet * sheets,
+      subtotal,
+      minimum,
+      total,
+      minimumApplied: total > subtotal
+    };
+  }, [customPrices, clientType]);
 
   const calculateResults = useCallback(() => {
     try {
@@ -878,7 +1698,7 @@ const Cotizador = () => {
         }
 
         // Calcular precio
-        const priceData = getPapelAdhesivoWithLayout(bestLayout.perSheet, sheetsNeeded);
+        const priceData = getCustomPapelAdhesivoWithLayout(bestLayout.perSheet, sheetsNeeded);
         
         if (priceData.error) {
           setResults({ error: true, message: priceData.message });
@@ -935,7 +1755,7 @@ const Cotizador = () => {
             return;
           }
 
-          priceData = getDTFTextilPrice(meters);
+          priceData = getCustomDTFTextilPrice(meters);
           
           setResults({
             type: 'meters',
@@ -959,7 +1779,7 @@ const Cotizador = () => {
           return;
         }
 
-        priceData = getDTFTextilPrice(layout.totalMeters);
+        priceData = getCustomDTFTextilPrice(layout.totalMeters);
         
         setResults({
           type: 'sticker',
@@ -989,7 +1809,7 @@ const Cotizador = () => {
             return;
           }
 
-          priceData = getDTFUVPrice(meters);
+          priceData = getCustomDTFUVPrice(meters);
           
           setResults({
             type: 'meters',
@@ -1012,7 +1832,7 @@ const Cotizador = () => {
           return;
         }
 
-        priceData = getDTFUVPrice(layout.totalMeters);
+        priceData = getCustomDTFUVPrice(layout.totalMeters);
         
         setResults({
           type: 'sticker',
@@ -1031,14 +1851,16 @@ const Cotizador = () => {
 
       } else if (productType === 'viniles') {
         material = MATERIALS.VINILES;
-        const vinylCalc = calculateVinylM2(width, height, quantity, material.width, spacing);
+        // Usar ancho específico del tipo de vinil si está disponible, sino usar el ancho general
+        const materialWidth = material.types[vinylType]?.width || material.width;
+        const vinylCalc = calculateVinylM2(width, height, quantity, materialWidth, spacing);
         
         if (vinylCalc.error) {
           setResults({ error: true, message: vinylCalc.message });
           return;
         }
 
-        priceData = getVinylPrice(vinylType, vinylCalc.m2);
+        priceData = getCustomVinylPrice(vinylType, vinylCalc.m2);
         
         setResults({
           type: 'sticker',
@@ -1049,7 +1871,7 @@ const Cotizador = () => {
           ...vinylCalc,
           meters: vinylCalc.totalMeters,
           m2: vinylCalc.m2,
-          materialWidth: material.width,
+          materialWidth: materialWidth,
           price: priceData.total,
           pricePerM2: priceData.pricePerM2,
           subtotal: priceData.subtotal,
@@ -1091,12 +1913,13 @@ const Cotizador = () => {
     setResults(null);
   };
 
-  const handleAddToList = () => {
-    if (!results || results.error) return;
+  const handleAddToList = (customItem = null) => {
+    const itemToAdd = customItem || results;
+    if (!itemToAdd || itemToAdd.error) return;
     
     const newItem = {
       id: Date.now(),
-      ...results
+      ...itemToAdd
     };
     
     setQuotedItems(prev => [...prev, newItem]);
@@ -1161,6 +1984,37 @@ const Cotizador = () => {
     });
   };
 
+  // Mostrar pantalla de carga mientras se cargan los precios desde Supabase
+  if (pricesLoading || !customPrices) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-blue-50 to-purple-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600 text-lg">Cargando configuración de precios...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Mostrar error si hay problemas cargando precios
+  if (pricesError) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-blue-50 to-purple-50 flex items-center justify-center">
+        <div className="text-center bg-red-50 border-2 border-red-300 rounded-lg p-8 max-w-md">
+          <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-red-700 mb-2">Error al cargar precios</h2>
+          <p className="text-red-600 mb-4">{pricesError}</p>
+          <button
+            onClick={reloadPrices}
+            className="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-lg transition-colors"
+          >
+            Reintentar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-blue-50 to-purple-50">
       {/* Page Title Section */}
@@ -1188,6 +2042,61 @@ const Cotizador = () => {
           onClearAll={handleClearList}
           onCopyAll={handleCopyAllItems}
         />
+        
+        <PriceReferenceTable 
+          customPrices={customPrices}
+          onPricesChange={setCustomPrices}
+          clientType={clientType}
+        />
+        
+        {/* Selector de Tipo de Cliente */}
+        <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg shadow-md p-6 mb-6">
+          <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
+            <DollarSign size={20} />
+            Tipo de Cliente
+          </h3>
+          <div className="grid grid-cols-3 gap-3">
+            <button
+              onClick={() => setClientType('elite')}
+              className={`py-3 px-4 rounded-lg font-medium transition-all ${
+                clientType === 'elite'
+                  ? 'bg-white text-purple-600 shadow-lg scale-105'
+                  : 'bg-purple-400 hover:bg-purple-300 text-white'
+              }`}
+            >
+              <div className="text-sm">👑</div>
+              <div className="font-bold">Elite</div>
+              <div className="text-xs opacity-75">-15%</div>
+            </button>
+            <button
+              onClick={() => setClientType('pro')}
+              className={`py-3 px-4 rounded-lg font-medium transition-all ${
+                clientType === 'pro'
+                  ? 'bg-white text-pink-600 shadow-lg scale-105'
+                  : 'bg-pink-400 hover:bg-pink-300 text-white'
+              }`}
+            >
+              <div className="text-sm">🏢</div>
+              <div className="font-bold">Pro/Printer</div>
+              <div className="text-xs opacity-75">Precio base</div>
+            </button>
+            <button
+              onClick={() => setClientType('cf')}
+              className={`py-3 px-4 rounded-lg font-medium transition-all ${
+                clientType === 'cf'
+                  ? 'bg-white text-purple-600 shadow-lg scale-105'
+                  : 'bg-purple-400 hover:bg-purple-300 text-white'
+              }`}
+            >
+              <div className="text-sm">💰</div>
+              <div className="font-bold">CF</div>
+              <div className="text-xs opacity-75">+15%</div>
+            </button>
+          </div>
+          <p className="text-white text-xs mt-3 text-center opacity-90">
+            Los precios se ajustan automáticamente según el tipo de cliente seleccionado
+          </p>
+        </div>
         
         <ProductSelector 
           productType={productType}

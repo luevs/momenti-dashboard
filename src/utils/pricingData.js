@@ -55,6 +55,7 @@ export const MATERIALS = {
       },
       suajado: {
         name: 'Vinil Suajado',
+        width: 120, // cm (1.2m) - ancho específico para vinil suajado
         pricePerM2: 220,
         pricePerM2Above8: 200,
         pricePerM2Below05: 260,
