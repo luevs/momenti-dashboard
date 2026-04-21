@@ -46,7 +46,10 @@ export default function MaquinaDetalle() {
   const [corteOperador, setCorteOperador] = useState("");
   const [corteError, setCorteError] = useState("");
   const [corteTotalMes, setCorteTotalMes] = useState(0);
+  const [corteLoading, setCorteLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("insumos"); // "insumos" o "historial"
+  const [rollNumber, setRollNumber] = useState("");
+  const [rollNumberSuggestion, setRollNumberSuggestion] = useState("");
   
 
   // --- HANDLERS PARA MODALES DE EDITAR Y ELIMINAR ---
@@ -299,8 +302,20 @@ export default function MaquinaDetalle() {
     }
   };
 
+  const generateRollNumber = async (supplyTypeId, machineId) => {
+    const { count } = await supabase
+      .from('supply_rolls')
+      .select('*', { count: 'exact', head: true })
+      .eq('machine_id', machineId)
+      .eq('supply_type_id', supplyTypeId);
+    const next = String((count || 0) + 1).padStart(3, '0');
+    const machineName = machines.find(m => m.id === machineId)?.name || 'M';
+    const prefix = machineName.replace(/\s+/g, '').slice(0, 4).toUpperCase();
+    return `${prefix}-${supplyTypeId}-${next}`;
+  };
+
   // Abrir modal de reposición
-  const openRestockModal = (supply) => {
+  const openRestockModal = async (supply) => {
     setSelectedSupply(supply);
     setRestockModalOpen(true);
     setNewStock("");
@@ -310,6 +325,12 @@ export default function MaquinaDetalle() {
     setUnitCost("");
     setNotes("");
     setRecordedBy(currentUser?.name || currentUser?.email || "Sistema");
+    const suggestion = await generateRollNumber(
+      supply.supply_type_id, 
+      supply.machine_id
+    );
+    setRollNumberSuggestion(suggestion);
+    setRollNumber(suggestion);
   };
 
   // Cerrar modal de reposición
@@ -322,6 +343,8 @@ export default function MaquinaDetalle() {
     setSupplierName("");
     setUnitCost("");
     setNotes("");
+    setRollNumber("");
+    setRollNumberSuggestion("");
   };
 
   const closeHistoryModal = () => {
@@ -342,10 +365,15 @@ export default function MaquinaDetalle() {
       return;
     }
 
+    if (!rollNumber.trim()) {
+      alert("Ingresa el número de rollo o unidad.");
+      return;
+    }
+
     try {
       const quantityBefore = parseFloat(selectedSupply.current_stock);
-      const quantityAfter = parseFloat(newStock);
-      const quantityChanged = quantityAfter - quantityBefore;
+      const quantityChanged = parseFloat(newStock);
+      const quantityAfter = quantityBefore + quantityChanged;
       const recordedAtIso = new Date().toISOString();
 
       // Registrar el movimiento en el historial
@@ -387,6 +415,24 @@ export default function MaquinaDetalle() {
         .eq('id', selectedSupply.id);
 
       if (updateError) throw updateError;
+
+      await supabase
+        .from('supply_rolls')
+        .insert([{
+          machine_id: selectedSupply.machine_id,
+          supply_type_id: selectedSupply.supply_type_id,
+          roll_number: rollNumber.trim(),
+          initial_stock: quantityChanged,
+          current_stock: quantityChanged,
+          status: 'active',
+          received_by: recordedBy.trim(),
+          received_at: recordedAtIso,
+          cost: unitCost ? parseFloat(unitCost) : null,
+          supplier: supplierName || null,
+          batch_number: batchNumber || null,
+          notes: notes || null,
+          meters_yielded: 0
+        }]);
 
       alert(`Stock actualizado correctamente. ${selectedSupply.supply_types.name}: ${quantityAfter} ${selectedSupply.supply_types.unit}`);
       closeRestockModal();
@@ -856,10 +902,26 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
 
             <div className="flex flex-col gap-4">
               <div>
-                <label className="block text-gray-700 font-bold mb-2">Nueva cantidad total *</label>
+                <label className="block text-gray-700 font-bold mb-2">
+                  Número de rollo/unidad *
+                </label>
+                <input
+                  type="text"
+                  value={rollNumber}
+                  onChange={e => setRollNumber(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                  placeholder="Número de identificación"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Sugerido: {rollNumberSuggestion} — puedes modificarlo
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-bold mb-2">Cantidad a agregar *</label>
                 <input
                   type="number"
-                  placeholder="Cantidad después de reponer"
+                  placeholder="Metros o unidades que llegan"
                   value={newStock}
                   onChange={(e) => setNewStock(e.target.value)}
                   className="border rounded px-3 py-2 w-full"
@@ -944,10 +1006,10 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
               {newStock && (
                 <div className="bg-blue-50 p-3 rounded text-sm">
                   <p>
-                    <strong>Cambio:</strong> {parseFloat(newStock) - selectedSupply.current_stock > 0 ? '+' : ''}{(parseFloat(newStock) - selectedSupply.current_stock).toFixed(2)} {selectedSupply.supply_types.unit}
+                    <strong>Cambio:</strong> {parseFloat(newStock) > 0 ? '+' : ''}{parseFloat(newStock).toFixed(2)} {selectedSupply.supply_types.unit}
                   </p>
                   <p>
-                    <strong>Stock final:</strong> {newStock} {selectedSupply.supply_types.unit}
+                    <strong>Stock final:</strong> {(parseFloat(newStock) + selectedSupply.current_stock).toFixed(2)} {selectedSupply.supply_types.unit}
                   </p>
                 </div>
               )}
@@ -1424,34 +1486,21 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
                     setCorteError("Selecciona el operador.");
                     return;
                   }
-                  
-                  // Verificar si ya existe un corte para esta fecha y máquina
-                  const { data: existente, error: existenteError } = await supabase
-                    .from('production_records')
-                    .select('id')
-                    .eq('machine_id', selectedMachine.id)
-                    .eq('date', corteFecha);
-                  if (existenteError) {
-                    setCorteError("Error al verificar corte existente: " + existenteError.message);
-                    return;
-                  }
-                  if (existente && existente.length > 0) {
-                    setCorteError("Ya existe un corte para esta máquina y fecha.");
-                    return;
-                  }
 
+                  setCorteLoading(true);
                   try {
                     // Inserta el corte
                     const { error } = await supabase
-                      .from('production_records')
+                      .from('machine_daily_prints')
                       .insert([{
-                        machine_id: selectedMachine.id,
-                        date: getLocalDateString(new Date()),
-                        meters_printed: Number(metrosHoy),
-                        registered_by: currentUser?.name || currentUser?.email || 'Sistema'
+                        machine_id: id,
+                        date: corteFecha,
+                        meters_printed: Number(corteMetros),
+                        registered_by: corteOperador
                       }]);
                     if (error) {
                       setCorteError("Error al guardar el corte: " + error.message);
+                      setCorteLoading(false);
                       return;
                     }
                     alert("¡Corte diario registrado correctamente!");
@@ -1459,14 +1508,17 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
                     setCorteError("");
                     setCorteOperador("");
                     setCorteMetros("");
+                    setCorteLoading(false);
                     setCorteModalOpen(false);
                   } catch (error) {
                     setCorteError("Error al guardar el corte: " + error.message);
+                    setCorteLoading(false);
                   }
                 }}
-                className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600"
+                disabled={corteLoading}
+                className={`bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 ${corteLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
-                Guardar Corte Diario
+                {corteLoading ? "Guardando..." : "Guardar Corte Diario"}
               </button>
             </div>
           </div>

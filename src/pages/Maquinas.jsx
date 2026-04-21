@@ -22,11 +22,7 @@ function getLocalDateString(date = new Date()) {
 }
 
 export default function Maquinas() {
-  const [impresoras, setImpresoras] = useState([
-    { id: 1, nombre: "DTF 1 (Left)", estado: "activo", cola: 2 },
-    { id: 2, nombre: "DTF 2 (Right)", estado: "inactivo", cola: 0 },
-    { id: 3, nombre: "UV DTF", estado: "cola", cola: 5 },
-  ]);
+  const [impresoras, setImpresoras] = useState([]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [nuevaNombre, setNuevaNombre] = useState("");
@@ -56,11 +52,43 @@ export default function Maquinas() {
   // Estados para movimientos
   const [showMovementsPanel, setShowMovementsPanel] = useState(false);
   const [periodFilter, setPeriodFilter] = useState('hoy');
+  const [specificDate, setSpecificDate] = useState(new Date().toISOString().slice(0, 10));
+  const [fechaInicio, setFechaInicio] = useState(new Date().toISOString().slice(0, 10));
+  const [fechaFin, setFechaFin] = useState(new Date().toISOString().slice(0, 10));
   const [movementsData, setMovementsData] = useState([]);
   const [isLoadingMovements, setIsLoadingMovements] = useState(false);
+  const [machineSupplies, setMachineSupplies] = useState({});
+  const [plotterMaterials, setPlotterMaterials] = useState([]);
+  const [selectedMaterial, setSelectedMaterial] = useState(null);
 
   const navigate = useNavigate();
   const currentUser = useCurrentUser();
+
+  // Cargar máquinas desde Supabase al montar el componente
+  useEffect(() => {
+    const fetchMachines = async () => {
+      const { data, error } = await supabase
+        .from('machines')
+        .select('*')
+        .order('id', { ascending: true });
+      
+      if (error) {
+        console.error('Error cargando máquinas:', error);
+        return;
+      }
+      
+      const formatted = (data || []).map(row => ({
+        id: row.id,
+        nombre: row.name,
+        estado: row.status || 'inactivo',
+        cola: 0,
+      }));
+      
+      setImpresoras(formatted);
+    };
+    
+    fetchMachines();
+  }, []);
 
   // fetch latest records for the current impresoras
   const fetchLatestRecords = async () => {
@@ -115,6 +143,28 @@ export default function Maquinas() {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const fetchMachineSupplies = async () => {
+    const { data, error } = await supabase
+      .from('machine_supplies')
+      .select('machine_id, current_stock, minimum_level, critical_level, supply_types(name)');
+    if (error || !data) return;
+    const grouped = {};
+    data.forEach(s => {
+      if (!grouped[s.machine_id]) grouped[s.machine_id] = [];
+      grouped[s.machine_id].push(s);
+    });
+    setMachineSupplies(grouped);
+  };
+
+  const fetchPlotterMaterials = async () => {
+    const { data, error } = await supabase
+      .from('machine_supplies')
+      .select('id, current_stock, meters_accounted, supply_type_id, supply_types(name, unit)')
+      .eq('machine_id', 4);
+    if (error || !data) return;
+    setPlotterMaterials(data);
   };
 
   useEffect(() => {
@@ -201,11 +251,12 @@ export default function Maquinas() {
   };
 
   // Fetch movimientos de producción por período desde machine_daily_prints
-  const fetchMovementsByPeriod = async (period = 'hoy') => {
+  const fetchMovementsByPeriod = async (period = 'hoy', customDate = null, rangoInicio = null, rangoFin = null) => {
     setIsLoadingMovements(true);
     
     const now = new Date();
     let startDate = new Date();
+    let endDate = null;
     
     switch(period) {
       case 'hoy':
@@ -226,6 +277,13 @@ export default function Maquinas() {
         monthAgo.setMonth(now.getMonth() - 1);
         startDate = getLocalDateString(monthAgo);
         break;
+      case 'fecha':
+        startDate = customDate || specificDate;
+        break;
+      case 'periodo':
+        startDate = rangoInicio || fechaInicio;
+        endDate = rangoFin || fechaFin;
+        break;
       case 'todo':
         startDate = '2020-01-01';
         break;
@@ -236,8 +294,10 @@ export default function Maquinas() {
       .select('*')
       .order('date', { ascending: false });
 
-    if (period === 'ayer') {
+    if (period === 'ayer' || period === 'fecha') {
       query = query.eq('date', startDate);
+    } else if (period === 'periodo') {
+      query = query.gte('date', startDate).lte('date', endDate);
     } else if (period !== 'todo') {
       query = query.gte('date', startDate);
     }
@@ -257,14 +317,16 @@ export default function Maquinas() {
   useEffect(() => {
     fetchLoyaltyMeters();
     fetchMachineProduction();
+    fetchMachineSupplies();
+    fetchPlotterMaterials();
   }, []);
 
-  // Cargar movimientos cuando cambia el período
+  // Cargar movimientos cuando cambia el período o fecha específica
   useEffect(() => {
     if (showMovementsPanel) {
-      fetchMovementsByPeriod(periodFilter);
+      fetchMovementsByPeriod(periodFilter, specificDate, fechaInicio, fechaFin);
     }
-  }, [periodFilter, showMovementsPanel]);
+  }, [periodFilter, specificDate, fechaInicio, fechaFin, showMovementsPanel]);
 
   // Calcular estadísticas de movimientos de producción
   const movementsStats = React.useMemo(() => {
@@ -344,14 +406,34 @@ export default function Maquinas() {
     }
   };
 
-  const agregarImpresora = () => {
-    const nueva = {
-      id: impresoras.length + 1,
-      nombre: nuevaNombre,
-      estado: nuevoEstado,
+  const agregarImpresora = async () => {
+    if (!nuevaNombre.trim()) {
+      alert("Ingresa un nombre para la impresora.");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('machines')
+      .insert([{ 
+        name: nuevaNombre.trim(), 
+        type: 'printer',
+        status: nuevoEstado 
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      alert("Error al guardar: " + error.message);
+      return;
+    }
+
+    setImpresoras(prev => [...prev, {
+      id: data.id,
+      nombre: data.name,
+      estado: data.status,
       cola: 0,
-    };
-    setImpresoras([...impresoras, nueva]);
+    }]);
+
     setNuevaNombre("");
     setNuevoEstado("activo");
     setModalOpen(false);
@@ -382,44 +464,35 @@ export default function Maquinas() {
       alert("Ingresa una cantidad válida de metros.");
       return;
     }
+
+    if (impresoraSeleccionada?.id === 4 && !selectedMaterial) {
+      alert("Selecciona el material que estás usando.");
+      return;
+    }
+
     const payload = {
       machine_id: impresoraSeleccionada.id,
       date: registroFecha,
       meters_printed: Number(metrosHoy),
       registered_by: (currentUser && (currentUser.name || currentUser.username || currentUser.email)) || 'Sistema'
     };
-    let previousMeters = 0;
-    try {
-      const { data: existing } = await supabase
-        .from('machine_daily_prints')
-        .select('id, meters_printed')
-        .eq('machine_id', payload.machine_id)
-        .eq('date', payload.date)
-        .maybeSingle();
-      if (existing) {
-        previousMeters = Number(existing.meters_printed) || 0;
-      }
-    } catch (fetchError) {
-      console.warn('No se pudo obtener registro previo', fetchError);
-    }
 
-    const { data: upserted, error } = await supabase
+    const { data: inserted, error } = await supabase
       .from('machine_daily_prints')
-      .upsert([payload], { onConflict: ['machine_id', 'date'] })
+      .insert([payload])
       .select();
     if (error) {
       alert("Error al registrar: " + error.message);
       return;
     }
 
-    const record = Array.isArray(upserted) ? upserted[0] : null;
-    const deltaMeters = payload.meters_printed - previousMeters;
+    const record = Array.isArray(inserted) ? inserted[0] : null;
 
-    if (record && deltaMeters !== 0) {
+    if (record && impresoraSeleccionada?.id !== 4) {
       try {
         await autoConsumeAfterProduction({
           machineId: record.machine_id,
-          meters: deltaMeters,
+          meters: record.meters_printed,
           operator: record.registered_by,
           productionRecordId: (typeof record?.id === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(record.id)) ? record.id : null,
           productionDate: record.date,
@@ -430,11 +503,44 @@ export default function Maquinas() {
       }
     }
 
+    if (impresoraSeleccionada?.id === 4 && selectedMaterial && record) {
+      const deltaMeters = Number(metrosHoy);
+      if (deltaMeters > 0) {
+        const newStock = Number(selectedMaterial.current_stock) - deltaMeters;
+        await supabase
+          .from('machine_supplies')
+          .update({ 
+            current_stock: Number(newStock.toFixed(3)),
+            meters_accounted: Number((selectedMaterial.meters_accounted || 0) + deltaMeters).toFixed(3),
+            last_updated: new Date().toISOString()
+          })
+          .eq('id', selectedMaterial.id);
+
+        await supabase
+          .from('supply_movements')
+          .insert([{
+            machine_id: 4,
+            supply_type_id: selectedMaterial.supply_type_id,
+            movement_type: 'consumption',
+            quantity_before: Number(selectedMaterial.current_stock),
+            quantity_after: Number(newStock.toFixed(3)),
+            quantity_changed: Number((-deltaMeters).toFixed(3)),
+            recorded_by: record?.registered_by || 'Sistema',
+            notes: `Consumo por corte ${registroFecha}`,
+            recorded_at: new Date().toISOString()
+          }]);
+          
+        setSelectedMaterial(null);
+      }
+    }
+
     // actualizar UI localmente
-    setLatestRecords(prev => ({ ...prev, [impresoraSeleccionada.id]: { ...payload } }));
+    await fetchLatestRecords();
     await fetchTodayTotals();
     await fetchLoyaltyMeters();
     await fetchMachineProduction();
+    await fetchMachineSupplies();
+    await fetchPlotterMaterials();
     alert("Registro guardado");
     setRegistroModalOpen(false);
     setMetrosHoy("");
@@ -575,12 +681,14 @@ export default function Maquinas() {
           <div className="mt-4 bg-white rounded-xl border border-gray-200 shadow-sm">
             {/* Filtros de período */}
             <div className="p-4 border-b border-gray-200">
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap items-center">
                 {[
                   { value: 'hoy', label: 'Hoy' },
                   { value: 'ayer', label: 'Ayer' },
                   { value: 'semana', label: 'Semana' },
                   { value: 'mes', label: 'Mes' },
+                  { value: 'fecha', label: 'Fecha específica' },
+                  { value: 'periodo', label: 'Período' },
                   { value: 'todo', label: 'Todo' }
                 ].map(period => (
                   <button
@@ -595,6 +703,36 @@ export default function Maquinas() {
                     {period.label}
                   </button>
                 ))}
+                {periodFilter === 'fecha' && (
+                  <input
+                    type="date"
+                    value={specificDate}
+                    onChange={(e) => setSpecificDate(e.target.value)}
+                    className="px-4 py-2 border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                )}
+                {periodFilter === 'periodo' && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm font-medium text-gray-700">Desde:</label>
+                      <input
+                        type="date"
+                        value={fechaInicio}
+                        onChange={(e) => setFechaInicio(e.target.value)}
+                        className="px-4 py-2 border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm font-medium text-gray-700">Hasta:</label>
+                      <input
+                        type="date"
+                        value={fechaFin}
+                        onChange={(e) => setFechaFin(e.target.value)}
+                        className="px-4 py-2 border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -737,6 +875,34 @@ export default function Maquinas() {
                 )}
               </div>
 
+              {(() => {
+                const supplies = machineSupplies[impresora.id] || [];
+                const critical = supplies.filter(s => 
+                  Number(s.current_stock) <= Number(s.critical_level)
+                );
+                const low = supplies.filter(s => 
+                  Number(s.current_stock) > Number(s.critical_level) && 
+                  Number(s.current_stock) <= Number(s.minimum_level)
+                );
+                if (critical.length === 0 && low.length === 0) return null;
+                return (
+                  <div className="mt-3 flex flex-wrap gap-1">
+                    {critical.map(s => (
+                      <span key={s.supply_types.name} 
+                        className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-700 font-medium">
+                        ⚠ {s.supply_types.name}
+                      </span>
+                    ))}
+                    {low.map(s => (
+                      <span key={s.supply_types.name} 
+                        className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700 font-medium">
+                        ↓ {s.supply_types.name}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })()}
+
               <div className="mt-4 flex gap-2">
                 <button
                   onClick={e => { e.stopPropagation(); openQueueModal(impresora); }}
@@ -751,6 +917,7 @@ export default function Maquinas() {
                     setRegistroModalOpen(true);
                     setMetrosHoy("");
                     setRegistroFecha(getLocalDateString());
+                    setSelectedMaterial(null);
                   }}
                   className="flex-1 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
                 >
@@ -952,6 +1119,28 @@ export default function Maquinas() {
               className="border rounded px-3 py-2 w-full mb-4"
               min="0"
             />
+            {impresoraSeleccionada?.id === 4 && (
+              <div className="mb-4">
+                <label className="block text-gray-700 font-bold mb-2">
+                  Material *
+                </label>
+                <select
+                  value={selectedMaterial?.id || ""}
+                  onChange={e => {
+                    const mat = plotterMaterials.find(m => m.id === Number(e.target.value));
+                    setSelectedMaterial(mat || null);
+                  }}
+                  className="border rounded px-3 py-2 w-full"
+                >
+                  <option value="">Selecciona material...</option>
+                  {plotterMaterials.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.supply_types.name} — Stock: {m.current_stock}m
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <button
               onClick={registrarMetros}
               className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full"

@@ -20,6 +20,38 @@ const fetchTrackableSupplies = async (machineId) => {
   return trackable.length > 0 ? trackable : supplies;
 };
 
+const updateActiveRoll = async (machineId, supplyTypeId, metersConsumed) => {
+  try {
+    const { data, error } = await supabase
+      .from('supply_rolls')
+      .select('id, current_stock, meters_yielded')
+      .eq('machine_id', machineId)
+      .eq('supply_type_id', supplyTypeId)
+      .eq('status', 'active')
+      .order('received_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) return;
+
+    const newStock = Number((data.current_stock - metersConsumed).toFixed(3));
+    const newYielded = Number((data.meters_yielded + metersConsumed).toFixed(3));
+    const isDepleted = newStock <= 0;
+
+    await supabase
+      .from('supply_rolls')
+      .update({
+        current_stock: Math.max(0, newStock),
+        meters_yielded: newYielded,
+        status: isDepleted ? 'depleted' : 'active',
+        depleted_at: isDepleted ? new Date().toISOString() : null
+      })
+      .eq('id', data.id);
+  } catch (e) {
+    console.error('Error updating active roll', e);
+  }
+};
+
 const buildMovementPayload = ({
   supply,
   machineId,
@@ -133,6 +165,9 @@ export const autoConsumeAfterProduction = async ({
             unit: supply?.supply_types?.unit || '',
             type: consuming ? 'consumption' : 'adjustment',
           });
+          if (consuming) {
+            await updateActiveRoll(machineId, supply.supply_type_id, quantity);
+          }
         }
       }
     } catch (e) {

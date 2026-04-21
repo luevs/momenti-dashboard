@@ -1,70 +1,53 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../supabaseClient';
 import { MATERIALS } from './pricingData';
 
 /**
- * Hook personalizado para gestionar configuración de precios desde Supabase
- * Carga precios al inicio y guarda cambios automáticamente
+ * Hook personalizado para gestionar configuración de precios con localStorage
+ * Usa localStorage para persistencia sin requerir autenticación
  */
 export const usePricingSettings = () => {
-  const [customPrices, setCustomPrices] = useState(null);
+  const [customPrices, setCustomPricesState] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [configId, setConfigId] = useState(null);
 
-  // Función helper para calcular precios por defecto con tipos de cliente
+  // Función helper para inicializar precios por defecto (sin cálculos automáticos)
+  // Todos los tipos de cliente inician con los mismos valores base
   const getDefaultPrices = useCallback(() => {
-    return {
+    // Valores base sin multiplicadores - el usuario los ajustará manualmente
+    const basePrices = {
       dtfTextil: {
-        elite: {
-          fraction: MATERIALS.DTF_TEXTIL.prices.regular.fraction * 0.85,
-          fullMeter: MATERIALS.DTF_TEXTIL.prices.regular.fullMeter * 0.85,
-          loyalty10: MATERIALS.DTF_TEXTIL.prices.loyalty[0].pricePerMeter * 0.85,
-          loyalty20: MATERIALS.DTF_TEXTIL.prices.loyalty[1].pricePerMeter * 0.85,
-          loyalty50: MATERIALS.DTF_TEXTIL.prices.loyalty[2].pricePerMeter * 0.85,
-        },
-        pro: {
-          fraction: MATERIALS.DTF_TEXTIL.prices.regular.fraction,
-          fullMeter: MATERIALS.DTF_TEXTIL.prices.regular.fullMeter,
-          loyalty10: MATERIALS.DTF_TEXTIL.prices.loyalty[0].pricePerMeter,
-          loyalty20: MATERIALS.DTF_TEXTIL.prices.loyalty[1].pricePerMeter,
-          loyalty50: MATERIALS.DTF_TEXTIL.prices.loyalty[2].pricePerMeter,
-        },
-        cf: {
-          fraction: MATERIALS.DTF_TEXTIL.prices.regular.fraction * 1.15,
-          fullMeter: MATERIALS.DTF_TEXTIL.prices.regular.fullMeter * 1.15,
-          loyalty10: MATERIALS.DTF_TEXTIL.prices.loyalty[0].pricePerMeter * 1.15,
-          loyalty20: MATERIALS.DTF_TEXTIL.prices.loyalty[1].pricePerMeter * 1.15,
-          loyalty50: MATERIALS.DTF_TEXTIL.prices.loyalty[2].pricePerMeter * 1.15,
-        },
+        fraction: MATERIALS.DTF_TEXTIL.prices.regular.fraction,
+        fullMeter: MATERIALS.DTF_TEXTIL.prices.regular.fullMeter,
+        loyalty10: MATERIALS.DTF_TEXTIL.prices.loyalty[0].pricePerMeter,
+        loyalty20: MATERIALS.DTF_TEXTIL.prices.loyalty[1].pricePerMeter,
+        loyalty50: MATERIALS.DTF_TEXTIL.prices.loyalty[2].pricePerMeter,
       },
       dtfUV: {
-        elite: {
-          regular: MATERIALS.DTF_UV.prices.regular * 0.85,
-          loyalty10: MATERIALS.DTF_UV.prices.loyalty[0].pricePerMeter * 0.85,
-          loyalty20: MATERIALS.DTF_UV.prices.loyalty[1].pricePerMeter * 0.85,
-          loyalty50: MATERIALS.DTF_UV.prices.loyalty[2].pricePerMeter * 0.85,
-        },
-        pro: {
-          regular: MATERIALS.DTF_UV.prices.regular,
-          loyalty10: MATERIALS.DTF_UV.prices.loyalty[0].pricePerMeter,
-          loyalty20: MATERIALS.DTF_UV.prices.loyalty[1].pricePerMeter,
-          loyalty50: MATERIALS.DTF_UV.prices.loyalty[2].pricePerMeter,
-        },
-        cf: {
-          regular: MATERIALS.DTF_UV.prices.regular * 1.15,
-          loyalty10: MATERIALS.DTF_UV.prices.loyalty[0].pricePerMeter * 1.15,
-          loyalty20: MATERIALS.DTF_UV.prices.loyalty[1].pricePerMeter * 1.15,
-          loyalty50: MATERIALS.DTF_UV.prices.loyalty[2].pricePerMeter * 1.15,
-        },
+        regular: MATERIALS.DTF_UV.prices.regular,
+        loyalty10: MATERIALS.DTF_UV.prices.loyalty[0].pricePerMeter,
+        loyalty20: MATERIALS.DTF_UV.prices.loyalty[1].pricePerMeter,
+        loyalty50: MATERIALS.DTF_UV.prices.loyalty[2].pricePerMeter,
+      }
+    };
+
+    return {
+      dtfTextil: {
+        elite: { ...basePrices.dtfTextil },
+        pro: { ...basePrices.dtfTextil },
+        cf: { ...basePrices.dtfTextil },
+      },
+      dtfUV: {
+        elite: { ...basePrices.dtfUV },
+        pro: { ...basePrices.dtfUV },
+        cf: { ...basePrices.dtfUV },
       },
       viniles: {
         impreso: {
           elite: {
-            below05: MATERIALS.VINILES.types.impreso.pricePerM2Below05 * 0.85,
-            regular: MATERIALS.VINILES.types.impreso.pricePerM2 * 0.85,
-            above8: MATERIALS.VINILES.types.impreso.pricePerM2Above8 * 0.85,
-            minimum: MATERIALS.VINILES.types.impreso.minimum * 0.85,
+            below05: MATERIALS.VINILES.types.impreso.pricePerM2Below05,
+            regular: MATERIALS.VINILES.types.impreso.pricePerM2,
+            above8: MATERIALS.VINILES.types.impreso.pricePerM2Above8,
+            minimum: MATERIALS.VINILES.types.impreso.minimum,
           },
           pro: {
             below05: MATERIALS.VINILES.types.impreso.pricePerM2Below05,
@@ -73,18 +56,18 @@ export const usePricingSettings = () => {
             minimum: MATERIALS.VINILES.types.impreso.minimum,
           },
           cf: {
-            below05: MATERIALS.VINILES.types.impreso.pricePerM2Below05 * 1.15,
-            regular: MATERIALS.VINILES.types.impreso.pricePerM2 * 1.15,
-            above8: MATERIALS.VINILES.types.impreso.pricePerM2Above8 * 1.15,
-            minimum: MATERIALS.VINILES.types.impreso.minimum * 1.15,
+            below05: MATERIALS.VINILES.types.impreso.pricePerM2Below05,
+            regular: MATERIALS.VINILES.types.impreso.pricePerM2,
+            above8: MATERIALS.VINILES.types.impreso.pricePerM2Above8,
+            minimum: MATERIALS.VINILES.types.impreso.minimum,
           },
         },
         suajado: {
           elite: {
-            below05: MATERIALS.VINILES.types.suajado.pricePerM2Below05 * 0.85,
-            regular: MATERIALS.VINILES.types.suajado.pricePerM2 * 0.85,
-            above8: MATERIALS.VINILES.types.suajado.pricePerM2Above8 * 0.85,
-            minimum: MATERIALS.VINILES.types.suajado.minimum * 0.85,
+            below05: MATERIALS.VINILES.types.suajado.pricePerM2Below05,
+            regular: MATERIALS.VINILES.types.suajado.pricePerM2,
+            above8: MATERIALS.VINILES.types.suajado.pricePerM2Above8,
+            minimum: MATERIALS.VINILES.types.suajado.minimum,
           },
           pro: {
             below05: MATERIALS.VINILES.types.suajado.pricePerM2Below05,
@@ -93,18 +76,18 @@ export const usePricingSettings = () => {
             minimum: MATERIALS.VINILES.types.suajado.minimum,
           },
           cf: {
-            below05: MATERIALS.VINILES.types.suajado.pricePerM2Below05 * 1.15,
-            regular: MATERIALS.VINILES.types.suajado.pricePerM2 * 1.15,
-            above8: MATERIALS.VINILES.types.suajado.pricePerM2Above8 * 1.15,
-            minimum: MATERIALS.VINILES.types.suajado.minimum * 1.15,
+            below05: MATERIALS.VINILES.types.suajado.pricePerM2Below05,
+            regular: MATERIALS.VINILES.types.suajado.pricePerM2,
+            above8: MATERIALS.VINILES.types.suajado.pricePerM2Above8,
+            minimum: MATERIALS.VINILES.types.suajado.minimum,
           },
         },
         microperforado: {
           elite: {
-            below05: MATERIALS.VINILES.types.microperforado.pricePerM2Below05 * 0.85,
-            regular: MATERIALS.VINILES.types.microperforado.pricePerM2 * 0.85,
-            above8: MATERIALS.VINILES.types.microperforado.pricePerM2Above8 * 0.85,
-            minimum: MATERIALS.VINILES.types.microperforado.minimum * 0.85,
+            below05: MATERIALS.VINILES.types.microperforado.pricePerM2Below05,
+            regular: MATERIALS.VINILES.types.microperforado.pricePerM2,
+            above8: MATERIALS.VINILES.types.microperforado.pricePerM2Above8,
+            minimum: MATERIALS.VINILES.types.microperforado.minimum,
           },
           pro: {
             below05: MATERIALS.VINILES.types.microperforado.pricePerM2Below05,
@@ -113,18 +96,18 @@ export const usePricingSettings = () => {
             minimum: MATERIALS.VINILES.types.microperforado.minimum,
           },
           cf: {
-            below05: MATERIALS.VINILES.types.microperforado.pricePerM2Below05 * 1.15,
-            regular: MATERIALS.VINILES.types.microperforado.pricePerM2 * 1.15,
-            above8: MATERIALS.VINILES.types.microperforado.pricePerM2Above8 * 1.15,
-            minimum: MATERIALS.VINILES.types.microperforado.minimum * 1.15,
+            below05: MATERIALS.VINILES.types.microperforado.pricePerM2Below05,
+            regular: MATERIALS.VINILES.types.microperforado.pricePerM2,
+            above8: MATERIALS.VINILES.types.microperforado.pricePerM2Above8,
+            minimum: MATERIALS.VINILES.types.microperforado.minimum,
           },
         },
         holografico: {
           elite: {
-            below05: MATERIALS.VINILES.types.holografico.pricePerM2Below05 * 0.85,
-            regular: MATERIALS.VINILES.types.holografico.pricePerM2 * 0.85,
-            above8: MATERIALS.VINILES.types.holografico.pricePerM2Above8 * 0.85,
-            minimum: MATERIALS.VINILES.types.holografico.minimum * 0.85,
+            below05: MATERIALS.VINILES.types.holografico.pricePerM2Below05,
+            regular: MATERIALS.VINILES.types.holografico.pricePerM2,
+            above8: MATERIALS.VINILES.types.holografico.pricePerM2Above8,
+            minimum: MATERIALS.VINILES.types.holografico.minimum,
           },
           pro: {
             below05: MATERIALS.VINILES.types.holografico.pricePerM2Below05,
@@ -133,17 +116,17 @@ export const usePricingSettings = () => {
             minimum: MATERIALS.VINILES.types.holografico.minimum,
           },
           cf: {
-            below05: MATERIALS.VINILES.types.holografico.pricePerM2Below05 * 1.15,
-            regular: MATERIALS.VINILES.types.holografico.pricePerM2 * 1.15,
-            above8: MATERIALS.VINILES.types.holografico.pricePerM2Above8 * 1.15,
-            minimum: MATERIALS.VINILES.types.holografico.minimum * 1.15,
+            below05: MATERIALS.VINILES.types.holografico.pricePerM2Below05,
+            regular: MATERIALS.VINILES.types.holografico.pricePerM2,
+            above8: MATERIALS.VINILES.types.holografico.pricePerM2Above8,
+            minimum: MATERIALS.VINILES.types.holografico.minimum,
           },
         },
         lona: {
           elite: {
             below05: MATERIALS.VINILES.types.lona.pricePerM2Below05,
-            regular: MATERIALS.VINILES.types.lona.pricePerM2 * 0.85,
-            above8: MATERIALS.VINILES.types.lona.pricePerM2Above8 * 0.85,
+            regular: MATERIALS.VINILES.types.lona.pricePerM2,
+            above8: MATERIALS.VINILES.types.lona.pricePerM2Above8,
             minimum: MATERIALS.VINILES.types.lona.minimum,
           },
           pro: {
@@ -154,8 +137,8 @@ export const usePricingSettings = () => {
           },
           cf: {
             below05: MATERIALS.VINILES.types.lona.pricePerM2Below05,
-            regular: MATERIALS.VINILES.types.lona.pricePerM2 * 1.15,
-            above8: MATERIALS.VINILES.types.lona.pricePerM2Above8 * 1.15,
+            regular: MATERIALS.VINILES.types.lona.pricePerM2,
+            above8: MATERIALS.VINILES.types.lona.pricePerM2Above8,
             minimum: MATERIALS.VINILES.types.lona.minimum,
           },
         },
@@ -163,16 +146,16 @@ export const usePricingSettings = () => {
       papel: {
         elite: {
           range1: {
-            price: MATERIALS.PAPEL_ADHESIVO.ranges[0].pricePerSheet * 0.85,
-            minimum: MATERIALS.PAPEL_ADHESIVO.ranges[0].minimum * 0.85,
+            price: MATERIALS.PAPEL_ADHESIVO.ranges[0].pricePerSheet,
+            minimum: MATERIALS.PAPEL_ADHESIVO.ranges[0].minimum,
           },
           range2: {
-            price: MATERIALS.PAPEL_ADHESIVO.ranges[1].pricePerSheet * 0.85,
-            minimum: MATERIALS.PAPEL_ADHESIVO.ranges[1].minimum * 0.85,
+            price: MATERIALS.PAPEL_ADHESIVO.ranges[1].pricePerSheet,
+            minimum: MATERIALS.PAPEL_ADHESIVO.ranges[1].minimum,
           },
           range3: {
-            price: MATERIALS.PAPEL_ADHESIVO.ranges[2].pricePerSheet * 0.85,
-            minimum: MATERIALS.PAPEL_ADHESIVO.ranges[2].minimum * 0.85,
+            price: MATERIALS.PAPEL_ADHESIVO.ranges[2].pricePerSheet,
+            minimum: MATERIALS.PAPEL_ADHESIVO.ranges[2].minimum,
           },
         },
         pro: {
@@ -191,120 +174,76 @@ export const usePricingSettings = () => {
         },
         cf: {
           range1: {
-            price: MATERIALS.PAPEL_ADHESIVO.ranges[0].pricePerSheet * 1.15,
-            minimum: MATERIALS.PAPEL_ADHESIVO.ranges[0].minimum * 1.15,
+            price: MATERIALS.PAPEL_ADHESIVO.ranges[0].pricePerSheet,
+            minimum: MATERIALS.PAPEL_ADHESIVO.ranges[0].minimum,
           },
           range2: {
-            price: MATERIALS.PAPEL_ADHESIVO.ranges[1].pricePerSheet * 1.15,
-            minimum: MATERIALS.PAPEL_ADHESIVO.ranges[1].minimum * 1.15,
+            price: MATERIALS.PAPEL_ADHESIVO.ranges[1].pricePerSheet,
+            minimum: MATERIALS.PAPEL_ADHESIVO.ranges[1].minimum,
           },
           range3: {
-            price: MATERIALS.PAPEL_ADHESIVO.ranges[2].pricePerSheet * 1.15,
-            minimum: MATERIALS.PAPEL_ADHESIVO.ranges[2].minimum * 1.15,
+            price: MATERIALS.PAPEL_ADHESIVO.ranges[2].pricePerSheet,
+            minimum: MATERIALS.PAPEL_ADHESIVO.ranges[2].minimum,
           },
         },
       },
     };
   }, []);
 
-  // Cargar configuración de precios desde Supabase
-  const loadPricingSettings = useCallback(async () => {
+  // Cargar configuración de precios desde localStorage
+  const loadPricingSettings = useCallback(() => {
     try {
       setIsLoading(true);
       setError(null);
 
-      // Obtener usuario actual
-      const { data: { user } } = await supabase.auth.getUser();
-
-      // Primero intentar obtener configuración personal del usuario
-      let { data: userConfig, error: userError } = await supabase
-        .from('pricing_settings')
-        .select('*')
-        .eq('user_id', user?.id)
-        .eq('is_active', true)
-        .single();
-
-      // Si no hay configuración personal, obtener la global
-      if (userError || !userConfig) {
-        const { data: globalConfig, error: globalError } = await supabase
-          .from('pricing_settings')
-          .select('*')
-          .is('user_id', null)
-          .eq('is_active', true)
-          .single();
-
-        if (globalError) {
-          console.error('Error cargando configuración global:', globalError);
-          // Usar precios por defecto
-          setCustomPrices(getDefaultPrices());
-          setConfigId(null);
-        } else {
-          setCustomPrices(globalConfig.price_config);
-          setConfigId(globalConfig.id);
+      // Intentar cargar desde localStorage
+      const savedPrices = localStorage.getItem('customPrices');
+      
+      if (savedPrices) {
+        try {
+          const parsedPrices = JSON.parse(savedPrices);
+          setCustomPricesState(parsedPrices);
+        } catch (parseError) {
+          console.error('Error parseando precios guardados:', parseError);
+          // Si hay error parseando, usar valores por defecto
+          const defaultPrices = getDefaultPrices();
+          setCustomPricesState(defaultPrices);
+          localStorage.setItem('customPrices', JSON.stringify(defaultPrices));
         }
       } else {
-        setCustomPrices(userConfig.price_config);
-        setConfigId(userConfig.id);
+        // Si no hay precios guardados, usar valores por defecto
+        const defaultPrices = getDefaultPrices();
+        setCustomPricesState(defaultPrices);
+        localStorage.setItem('customPrices', JSON.stringify(defaultPrices));
       }
     } catch (err) {
       console.error('Error al cargar precios:', err);
       setError(err.message);
       // Usar precios por defecto en caso de error
-      setCustomPrices(getDefaultPrices());
+      setCustomPricesState(getDefaultPrices());
     } finally {
       setIsLoading(false);
     }
   }, [getDefaultPrices]);
 
-  // Guardar configuración de precios en Supabase
-  const savePricingSettings = useCallback(async (newPrices) => {
+  // Guardar configuración de precios en localStorage
+  const setCustomPrices = useCallback((newPrices) => {
     try {
       setError(null);
-
-      // Obtener usuario actual
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!user) {
-        throw new Error('Usuario no autenticado');
-      }
-
-      if (configId) {
-        // Actualizar configuración existente
-        const { error: updateError } = await supabase
-          .from('pricing_settings')
-          .update({
-            price_config: newPrices,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', configId);
-
-        if (updateError) throw updateError;
-      } else {
-        // Crear nueva configuración personal
-        const { data: newConfig, error: insertError } = await supabase
-          .from('pricing_settings')
-          .insert({
-            user_id: user.id,
-            config_name: 'Mi Configuración',
-            price_config: newPrices,
-            is_active: true,
-            created_by: user.id
-          })
-          .select()
-          .single();
-
-        if (insertError) throw insertError;
-        setConfigId(newConfig.id);
-      }
-
-      setCustomPrices(newPrices);
-      console.log('✅ Precios guardados exitosamente en Supabase');
+      
+      // Guardar en localStorage
+      localStorage.setItem('customPrices', JSON.stringify(newPrices));
+      
+      // Actualizar estado
+      setCustomPricesState(newPrices);
+      
+      console.log('✅ Precios guardados exitosamente en localStorage');
     } catch (err) {
       console.error('Error al guardar precios:', err);
       setError(err.message);
       throw err;
     }
-  }, [configId]);
+  }, []);
 
   // Cargar precios al montar el componente
   useEffect(() => {
@@ -313,7 +252,7 @@ export const usePricingSettings = () => {
 
   return {
     customPrices,
-    setCustomPrices: savePricingSettings,
+    setCustomPrices,
     isLoading,
     error,
     reloadPrices: loadPricingSettings

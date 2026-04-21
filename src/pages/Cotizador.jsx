@@ -352,15 +352,31 @@ const LoyaltyComparison = ({ loyaltyOptions }) => {
   );
 };
 
+// Componente para editar celdas de precio - movido fuera para evitar re-renders
+const PriceCell = ({ value, onChange, color = "text-gray-800", editMode }) => {
+  if (editMode) {
+    return (
+      <input
+        type="number"
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-2 py-1 border border-cyan-300 rounded text-right font-semibold focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        step="0.01"
+      />
+    );
+  }
+  return <span className={`font-semibold ${color}`}>${value || '-'}</span>;
+};
+
 const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
   const [showTable, setShowTable] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [tempPrices, setTempPrices] = useState(customPrices);
 
   const clientTypeLabels = {
-    elite: '👑 Elite (-15%)',
-    pro: '🏢 Pro/Printer (Base)',
-    cf: '💰 CF (+15%)'
+    elite: '👑 Elite',
+    pro: '🏢 Pro/Printer',
+    cf: '💰 CF'
   };
 
   useEffect(() => {
@@ -399,21 +415,6 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
   const handleCancel = () => {
     setTempPrices(customPrices);
     setEditMode(false);
-  };
-
-  const PriceCell = ({ value, onChange, color = "text-gray-800" }) => {
-    if (editMode) {
-      return (
-        <input
-          type="number"
-          value={value || ''}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full px-2 py-1 border border-cyan-300 rounded text-right font-semibold focus:outline-none focus:ring-2 focus:ring-cyan-500"
-          step="0.01"
-        />
-      );
-    }
-    return <span className={`font-semibold ${color}`}>${value || '-'}</span>;
   };
 
   return (
@@ -484,6 +485,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                       <PriceCell 
                         value={tempPrices.dtfTextil[clientType].fraction}
                         onChange={(val) => handlePriceEdit('dtfTextil', `${clientType}.fraction`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right text-gray-400">-</td>
@@ -494,6 +496,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                       <PriceCell 
                         value={tempPrices.dtfTextil[clientType].fullMeter}
                         onChange={(val) => handlePriceEdit('dtfTextil', `${clientType}.fullMeter`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right text-gray-400">-</td>
@@ -505,6 +508,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.dtfTextil[clientType].loyalty10}
                         onChange={(val) => handlePriceEdit('dtfTextil', `${clientType}.loyalty10`, val)}
                         color="text-green-600"
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right text-green-600 font-semibold">
@@ -518,6 +522,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.dtfTextil[clientType].loyalty20}
                         onChange={(val) => handlePriceEdit('dtfTextil', `${clientType}.loyalty20`, val)}
                         color="text-green-600"
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right text-green-600 font-semibold">
@@ -531,6 +536,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.dtfTextil[clientType].loyalty50}
                         onChange={(val) => handlePriceEdit('dtfTextil', `${clientType}.loyalty50`, val)}
                         color="text-green-600"
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right text-green-600 font-semibold">
@@ -563,6 +569,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                       <PriceCell 
                         value={tempPrices.dtfUV[clientType].regular}
                         onChange={(val) => handlePriceEdit('dtfUV', `${clientType}.regular`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right text-gray-400">-</td>
@@ -574,6 +581,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.dtfUV[clientType].loyalty10}
                         onChange={(val) => handlePriceEdit('dtfUV', `${clientType}.loyalty10`, val)}
                         color="text-green-600"
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right text-green-600 font-semibold">
@@ -587,6 +595,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.dtfUV[clientType].loyalty20}
                         onChange={(val) => handlePriceEdit('dtfUV', `${clientType}.loyalty20`, val)}
                         color="text-green-600"
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right text-green-600 font-semibold">
@@ -600,6 +609,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.dtfUV[clientType].loyalty50}
                         onChange={(val) => handlePriceEdit('dtfUV', `${clientType}.loyalty50`, val)}
                         color="text-green-600"
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right text-green-600 font-semibold">
@@ -634,12 +644,14 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                       <PriceCell 
                         value={tempPrices.viniles.impreso[clientType].below05}
                         onChange={(val) => handlePriceEdit('viniles', `impreso.${clientType}.below05`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
                       <PriceCell 
                         value={tempPrices.viniles.impreso[clientType].regular}
                         onChange={(val) => handlePriceEdit('viniles', `impreso.${clientType}.regular`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
@@ -647,6 +659,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.viniles.impreso[clientType].above8}
                         onChange={(val) => handlePriceEdit('viniles', `impreso.${clientType}.above8`, val)}
                         color="text-green-600"
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
@@ -654,6 +667,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.viniles.impreso[clientType].minimum}
                         onChange={(val) => handlePriceEdit('viniles', `impreso.${clientType}.minimum`, val)}
                         color="text-orange-600"
+                        editMode={editMode}
                       />
                     </td>
                   </tr>
@@ -663,12 +677,14 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                       <PriceCell 
                         value={tempPrices.viniles.suajado[clientType].below05}
                         onChange={(val) => handlePriceEdit('viniles', `suajado.${clientType}.below05`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
                       <PriceCell 
                         value={tempPrices.viniles.suajado[clientType].regular}
                         onChange={(val) => handlePriceEdit('viniles', `suajado.${clientType}.regular`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
@@ -676,6 +692,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.viniles.suajado[clientType].above8}
                         onChange={(val) => handlePriceEdit('viniles', `suajado.${clientType}.above8`, val)}
                         color="text-green-600"
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
@@ -683,6 +700,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.viniles.suajado[clientType].minimum}
                         onChange={(val) => handlePriceEdit('viniles', `suajado.${clientType}.minimum`, val)}
                         color="text-orange-600"
+                        editMode={editMode}
                       />
                     </td>
                   </tr>
@@ -692,18 +710,21 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                       <PriceCell 
                         value={tempPrices.viniles.microperforado[clientType].below05}
                         onChange={(val) => handlePriceEdit('viniles', `microperforado.${clientType}.below05`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
                       <PriceCell 
                         value={tempPrices.viniles.microperforado[clientType].regular}
                         onChange={(val) => handlePriceEdit('viniles', `microperforado.${clientType}.regular`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
                       <PriceCell 
                         value={tempPrices.viniles.microperforado[clientType].above8}
                         onChange={(val) => handlePriceEdit('viniles', `microperforado.${clientType}.above8`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
@@ -711,6 +732,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.viniles.microperforado[clientType].minimum}
                         onChange={(val) => handlePriceEdit('viniles', `microperforado.${clientType}.minimum`, val)}
                         color="text-orange-600"
+                        editMode={editMode}
                       />
                     </td>
                   </tr>
@@ -720,18 +742,21 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                       <PriceCell 
                         value={tempPrices.viniles.holografico[clientType].below05}
                         onChange={(val) => handlePriceEdit('viniles', `holografico.${clientType}.below05`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
                       <PriceCell 
                         value={tempPrices.viniles.holografico[clientType].regular}
                         onChange={(val) => handlePriceEdit('viniles', `holografico.${clientType}.regular`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
                       <PriceCell 
                         value={tempPrices.viniles.holografico[clientType].above8}
                         onChange={(val) => handlePriceEdit('viniles', `holografico.${clientType}.above8`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
@@ -739,6 +764,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.viniles.holografico[clientType].minimum}
                         onChange={(val) => handlePriceEdit('viniles', `holografico.${clientType}.minimum`, val)}
                         color="text-orange-600"
+                        editMode={editMode}
                       />
                     </td>
                   </tr>
@@ -749,6 +775,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                       <PriceCell 
                         value={tempPrices.viniles.lona[clientType].regular}
                         onChange={(val) => handlePriceEdit('viniles', `lona.${clientType}.regular`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
@@ -756,6 +783,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.viniles.lona[clientType].above8}
                         onChange={(val) => handlePriceEdit('viniles', `lona.${clientType}.above8`, val)}
                         color="text-green-600"
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">-</td>
@@ -786,6 +814,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                       <PriceCell 
                         value={tempPrices.papel[clientType].range1.price}
                         onChange={(val) => handlePriceEdit('papel', `${clientType}.range1.price`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
@@ -793,6 +822,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.papel[clientType].range1.minimum}
                         onChange={(val) => handlePriceEdit('papel', `${clientType}.range1.minimum`, val)}
                         color="text-orange-600"
+                        editMode={editMode}
                       />
                     </td>
                   </tr>
@@ -802,6 +832,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                       <PriceCell 
                         value={tempPrices.papel[clientType].range2.price}
                         onChange={(val) => handlePriceEdit('papel', `${clientType}.range2.price`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
@@ -809,6 +840,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.papel[clientType].range2.minimum}
                         onChange={(val) => handlePriceEdit('papel', `${clientType}.range2.minimum`, val)}
                         color="text-orange-600"
+                        editMode={editMode}
                       />
                     </td>
                   </tr>
@@ -818,6 +850,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                       <PriceCell 
                         value={tempPrices.papel[clientType].range3.price}
                         onChange={(val) => handlePriceEdit('papel', `${clientType}.range3.price`, val)}
+                        editMode={editMode}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
@@ -825,6 +858,7 @@ const PriceReferenceTable = ({ customPrices, onPricesChange, clientType }) => {
                         value={tempPrices.papel[clientType].range3.minimum}
                         onChange={(val) => handlePriceEdit('papel', `${clientType}.range3.minimum`, val)}
                         color="text-orange-600"
+                        editMode={editMode}
                       />
                     </td>
                   </tr>
