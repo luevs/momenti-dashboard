@@ -12,6 +12,7 @@ import Reportes from "./pages/Reportes";
 import Configuracion from "./pages/Configuracion";
 import ClientesLealtad from "./pages/Clientes-lealtad";
 import Insumos from "./pages/insumos";
+import Inventario from "./pages/Inventario";
 import MaquinaDetalle from "./pages/MaquinaDetalle";
 import Corte from "./pages/Corte.jsx";
 import Usuarios from "./pages/Usuarios";
@@ -114,11 +115,16 @@ function App() {
             <Layout><MaquinaDetalle /></Layout>
           </PrivateRoute>
         } />
-        <Route path="/reportes" element={
+        <Route path="/inventario" element={
+          <PrivateRoute>
+            <Layout><Inventario /></Layout>
+          </PrivateRoute>
+        } />
+        {/* <Route path="/reportes" element={
           <PrivateRoute>
             <Layout><Reportes /></Layout>
           </PrivateRoute>
-        } />
+        } /> */}
         <Route path="/configuracion" element={
           <PrivateRoute>
             <Layout><Configuracion /></Layout>

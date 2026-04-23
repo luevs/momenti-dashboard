@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient"; // ajusta la ruta si tu cliente está en otro sitio
-import { Printer, Calendar } from "lucide-react";
+import { Printer, Calendar, X } from "lucide-react";
 import AlertsPanel from "../components/AlertsPanel";
 import EfficiencyCard from "../components/EfficiencyCard";
 import "chart.js/auto";
@@ -50,6 +50,10 @@ export default function Dashboard() {
   const [machineTypes, setMachineTypes] = useState({});
   const [trendRecords, setTrendRecords] = useState([]);
   const [trendTech, setTrendTech] = useState("all");
+  const [supplyAlerts, setSupplyAlerts] = useState([]);
+  const [alertsDismissed, setAlertsDismissed] = useState(false);
+  const [machineStatus, setMachineStatus] = useState([]);
+  const [loyaltyInsights, setLoyaltyInsights] = useState(null);
 
   const aggregateTotalsByDate = (records = [], startDate, endDate) => {
     const totals = new Map();
@@ -132,6 +136,127 @@ export default function Dashboard() {
     warn: "text-amber-300",
     critical: "text-rose-300",
     pending: "text-slate-300",
+  };
+
+  const fetchSupplyAlerts = async () => {
+    const { data, error } = await supabase
+      .from('machine_supplies')
+      .select(`
+        id, current_stock, minimum_level, critical_level, machine_id,
+        supply_types (name, unit),
+        machines (name)
+      `);
+    if (error || !data) return;
+    const alerts = data
+      .filter(s => Number(s.current_stock) <= Number(s.minimum_level))
+      .map(s => ({
+        id: s.id,
+        machineName: s.machines?.name || '',
+        supplyName: s.supply_types?.name || '',
+        currentStock: Number(s.current_stock),
+        unit: s.supply_types?.unit || '',
+        level: Number(s.current_stock) <= Number(s.critical_level) ? 'critical' : 'low'
+      }));
+    setSupplyAlerts(alerts);
+  };
+
+  const fetchMachineStatus = async () => {
+    const todayStr = getLocalDateString();
+    
+    const { data: machines } = await supabase
+      .from('machines')
+      .select('id, name')
+      .order('name');
+
+    const { data: todayJobs } = await supabase
+      .from('machine_daily_prints')
+      .select('machine_id, meters_printed, folio, created_at')
+      .eq('date', todayStr)
+      .order('created_at', { ascending: false });
+
+    const { data: activeRolls } = await supabase
+      .from('inventory')
+      .select('machine_id, unit_id, quantity_remaining, supply_type_id')
+      .eq('status', 'in_machine')
+      .in('supply_type_id', [7, 15]);
+
+    const rollsByMachine = {};
+    (activeRolls || []).forEach(r => { rollsByMachine[r.machine_id] = r; });
+
+    const jobsByMachine = {};
+    (todayJobs || []).forEach(job => {
+      if (!jobsByMachine[job.machine_id]) {
+        jobsByMachine[job.machine_id] = { total: 0, lastFolio: null };
+      }
+      jobsByMachine[job.machine_id].total += Number(job.meters_printed || 0);
+      if (!jobsByMachine[job.machine_id].lastFolio && job.folio) {
+        jobsByMachine[job.machine_id].lastFolio = job.folio;
+      }
+    });
+
+    const status = (machines || []).map(m => ({
+      id: m.id,
+      name: m.name,
+      metersToday: jobsByMachine[m.id]?.total || 0,
+      lastFolio: jobsByMachine[m.id]?.lastFolio || null,
+      registeredToday: !!jobsByMachine[m.id],
+      activeRoll: rollsByMachine[m.id] || null
+    }));
+
+    setMachineStatus(status);
+  };
+
+  const fetchLoyaltyInsights = async () => {
+    const startOfMonth = getLocalDateString(
+      new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+    );
+
+    const { data: programs } = await supabase
+      .from('loyalty_programs')
+      .select('remaining_meters, total_meters, status, type')
+      .eq('status', 'activo');
+
+    const { data: orders } = await supabase
+      .from('order_history')
+      .select('meters_consumed, type, client_name, customer_id')
+      .gte('recorded_at', startOfMonth);
+
+    if (!programs) return;
+
+    const activeClients = new Set();
+    let dtfAvailable = 0;
+    let uvAvailable = 0;
+
+    programs.forEach(p => {
+      if (Number(p.remaining_meters) > 0) {
+        if (p.type === 'DTF Textil') dtfAvailable += Number(p.remaining_meters);
+        if (p.type === 'UV DTF') uvAvailable += Number(p.remaining_meters);
+      }
+    });
+
+    let monthlyConsumed = 0;
+    const clientConsumed = {};
+
+    (orders || []).forEach(o => {
+      const consumed = Number(o.meters_consumed || 0);
+      monthlyConsumed += consumed;
+      const key = o.client_name || o.customer_id;
+      if (!clientConsumed[key]) clientConsumed[key] = 0;
+      clientConsumed[key] += consumed;
+    });
+
+    const topClients = Object.entries(clientConsumed)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, meters]) => ({ name, meters }));
+
+    setLoyaltyInsights({
+      activePrograms: programs.filter(p => Number(p.remaining_meters) > 0).length,
+      dtfAvailable: Math.round(dtfAvailable),
+      uvAvailable: Math.round(uvAvailable),
+      monthlyConsumed: Math.round(monthlyConsumed),
+      topClients
+    });
   };
 
   useEffect(() => {
@@ -249,6 +374,10 @@ export default function Dashboard() {
         week: sumByType(weekData, 'UV DTF'),
         month: sumByType(monthData, 'UV DTF'),
       });
+
+      await fetchMachineStatus();
+      await fetchSupplyAlerts();
+      await fetchLoyaltyInsights();
     } catch (err) {
       console.error("Dashboard fetch error", err);
     } finally {
@@ -473,6 +602,37 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-8">
+      {!alertsDismissed && supplyAlerts.length > 0 && (
+        <div className={`mb-6 rounded-xl border px-4 py-3 flex items-start justify-between gap-4
+          ${supplyAlerts.some(a => a.level === 'critical') 
+            ? 'bg-rose-50 border-rose-200' 
+            : 'bg-amber-50 border-amber-200'}`}>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-slate-800 mb-1">
+              {supplyAlerts.filter(a => a.level === 'critical').length > 0
+                ? `⚠ ${supplyAlerts.filter(a => a.level === 'critical').length} insumo(s) en nivel crítico`
+                : `↓ ${supplyAlerts.length} insumo(s) por debajo del mínimo`}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {supplyAlerts.map(alert => (
+                <span key={alert.id} className={`text-xs px-2 py-1 rounded-full font-medium
+                  ${alert.level === 'critical' 
+                    ? 'bg-rose-100 text-rose-700' 
+                    : 'bg-amber-100 text-amber-700'}`}>
+                  {alert.supplyName} — {alert.machineName}: {alert.currentStock}{alert.unit}
+                </span>
+              ))}
+            </div>
+          </div>
+          <button
+            onClick={() => setAlertsDismissed(true)}
+            className="text-slate-400 hover:text-slate-600 shrink-0 mt-0.5"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       <section className="space-y-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
@@ -536,212 +696,126 @@ export default function Dashboard() {
         </div>
       </section>
 
-      <section className="space-y-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900">Tendencia por rango</h3>
-            <p className="text-xs text-slate-500">Visualiza el MI diario dentro del periodo seleccionado.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-xs text-slate-500">
-              Desde
-              <input
-                type="date"
-                value={trendRange.start}
-                max={trendRange.end || todayISO}
-                className="rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 shadow-sm focus:border-sky-400 focus:outline-none"
-                onChange={handleTrendRangeChange("start")}
-              />
-            </label>
-            <span className="text-slate-400">→</span>
-            <label className="flex items-center gap-2 text-xs text-slate-500">
-              Hasta
-              <input
-                type="date"
-                value={trendRange.end}
-                min={trendRange.start}
-                max={todayISO}
-                className="rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 shadow-sm focus:border-sky-400 focus:outline-none"
-                onChange={handleTrendRangeChange("end")}
-              />
-            </label>
-            <div className="flex items-center gap-2 text-xs">
-              {trendTechOptions.map((option) => {
-                const isActive = trendTech === option.id;
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setTrendTech(option.id)}
-                    className={`rounded-full border px-3 py-1 transition ${
-                      isActive
-                        ? "border-sky-500 bg-sky-500 text-white shadow"
-                        : "border-slate-200 text-slate-600 hover:border-sky-300 hover:text-sky-500"
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
+      <section className="space-y-3">
+        <h3 className="text-lg font-semibold text-slate-900">Estado de máquinas hoy</h3>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {machineStatus.map(m => (
+            <div
+              key={m.id}
+              onClick={() => navigate(`/maquinas/${m.id}`)}
+              className="bg-white border rounded-xl p-4 shadow-sm cursor-pointer 
+                hover:shadow-md transition hover:-translate-y-0.5"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Printer size={16} className="text-blue-600" />
+                  <span className="text-sm font-semibold text-slate-800 truncate">
+                    {m.name}
+                  </span>
+                </div>
+                <span className={`w-2.5 h-2.5 rounded-full shrink-0
+                  ${m.registeredToday ? 'bg-emerald-500' : 'bg-rose-400'}`}
+                />
+              </div>
+              <div className="text-2xl font-bold text-slate-900 mb-1">
+                {m.metersToday.toFixed(2)}
+                <span className="text-sm font-normal text-slate-500 ml-1">m hoy</span>
+              </div>
+              {m.activeRoll && (
+                <div className="text-xs text-slate-500 truncate">
+                  Rollo: <span className="font-mono text-blue-600">{m.activeRoll.unit_id}</span>
+                  <span className="ml-1">({m.activeRoll.quantity_remaining}m)</span>
+                </div>
+              )}
+              {m.lastFolio && (
+                <div className="text-xs text-slate-400 mt-0.5">
+                  Último: <span className="font-mono">{m.lastFolio}</span>
+                </div>
+              )}
+              {!m.registeredToday && (
+                <div className="text-xs text-rose-500 mt-1 font-medium">
+                  Sin registro hoy
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => setTrendPreset(7)}
-                className="rounded-full border border-slate-200 px-3 py-1 text-slate-600 hover:border-sky-300 hover:text-sky-500"
-              >
-                Últimos 7 días
-              </button>
-              <button
-                type="button"
-                onClick={() => setTrendPreset(14)}
-                className="rounded-full border border-slate-200 px-3 py-1 text-slate-600 hover:border-sky-300 hover:text-sky-500"
-              >
-                14 días
-              </button>
-              <button
-                type="button"
-                onClick={() => setTrendPreset(30)}
-                className="rounded-full border border-slate-200 px-3 py-1 text-slate-600 hover:border-sky-300 hover:text-sky-500"
-              >
-                30 días
-              </button>
-            </div>
-          </div>
+          ))}
         </div>
-        <div className="bg-white border rounded-lg p-5 shadow-sm">
-          <div className="mb-3 text-xs text-slate-500">
-            Rango activo: {trendRange.start} → {trendRange.end}
+      </section>
+
+      {loyaltyInsights && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-slate-900">Programas de Lealtad</h3>
+            <button
+              onClick={() => navigate('/clientes-lealtad')}
+              className="text-xs text-sky-600 hover:underline"
+            >
+              Ver todos →
+            </button>
           </div>
-          {isTrendLoading ? (
-            <div className="h-64 flex items-center justify-center text-sm text-slate-500">
-              Cargando datos de tendencia...
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="bg-white border border-blue-100 rounded-xl p-4 shadow-sm">
+              <p className="text-xs uppercase text-slate-400 tracking-wide mb-1">
+                Programas activos
+              </p>
+              <p className="text-3xl font-bold text-slate-900">
+                {loyaltyInsights.activePrograms}
+              </p>
             </div>
-          ) : hasWeeklyData ? (
-            <div className="h-64">
-              <Line data={weeklyLineData} options={weeklyLineOptions} />
+            <div className="bg-white border border-blue-100 rounded-xl p-4 shadow-sm">
+              <p className="text-xs uppercase text-slate-400 tracking-wide mb-1">
+                DTF disponible
+              </p>
+              <p className="text-3xl font-bold text-blue-600">
+                {loyaltyInsights.dtfAvailable}
+                <span className="text-sm font-normal text-slate-400 ml-1">m</span>
+              </p>
             </div>
-          ) : (
-            <div className="h-24 flex items-center justify-center text-sm text-slate-500">
-              No hay registros en el rango seleccionado.
+            <div className="bg-white border border-purple-100 rounded-xl p-4 shadow-sm">
+              <p className="text-xs uppercase text-slate-400 tracking-wide mb-1">
+                UV disponible
+              </p>
+              <p className="text-3xl font-bold text-purple-600">
+                {loyaltyInsights.uvAvailable}
+                <span className="text-sm font-normal text-slate-400 ml-1">m</span>
+              </p>
+            </div>
+            <div className="bg-white border border-amber-100 rounded-xl p-4 shadow-sm">
+              <p className="text-xs uppercase text-slate-400 tracking-wide mb-1">
+                Consumido este mes
+              </p>
+              <p className="text-3xl font-bold text-amber-600">
+                {loyaltyInsights.monthlyConsumed}
+                <span className="text-sm font-normal text-slate-400 ml-1">m</span>
+              </p>
+            </div>
+          </div>
+          {loyaltyInsights.topClients.length > 0 && (
+            <div className="bg-white border rounded-xl p-4 shadow-sm">
+              <p className="text-sm font-semibold text-slate-700 mb-3">
+                Top clientes este mes
+              </p>
+              <div className="space-y-2">
+                {loyaltyInsights.topClients.map((client, idx) => (
+                  <div key={idx} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-400 w-4">
+                        {idx + 1}
+                      </span>
+                      <span className="text-sm text-slate-700 truncate max-w-[200px]">
+                        {client.name}
+                      </span>
+                    </div>
+                    <span className="text-sm font-semibold text-slate-900">
+                      {client.meters.toFixed(1)}m
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <h3 className="text-lg font-semibold text-slate-900">Indicadores de eficiencia (en preparación)</h3>
-        <p className="text-sm text-slate-500">
-          Estos slots quedan listos para conectar nuevas fuentes. Las tarjetas muestran "Pendiente" hasta recibir datos.
-        </p>
-        <div className="grid gap-4 md:grid-cols-3">
-          {futureMetrics.map((metric) => (
-            <EfficiencyCard key={metric.id} {...metric} />
-          ))}
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <h3 className="text-lg font-semibold text-slate-900">Detalle por tecnología</h3>
-        <div className="grid gap-4 md:grid-cols-2">
-          {technologyTotals.map(({ id, label, totals, accent }) => (
-            <div key={id} className={`bg-white border rounded-lg p-5 shadow-sm ${accent}`}>
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="text-base font-semibold text-slate-900">{label}</h4>
-                <span className="text-xs font-medium text-slate-500">Hoy: {formatMetersWithUnit(totals.today)}</span>
-              </div>
-              <div className="grid grid-cols-3 gap-4 text-sm">
-                <div>
-                  <p className="text-xs uppercase text-slate-400">Ayer</p>
-                  <p className="font-semibold text-slate-800">{formatMetersWithUnit(totals.yesterday)}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase text-slate-400">Semana</p>
-                  <p className="font-semibold text-slate-800">{formatMetersWithUnit(totals.week)}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase text-slate-400">Mes</p>
-                  <p className="font-semibold text-slate-800">{formatMetersWithUnit(totals.month)}</p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <div className="grid gap-6 lg:grid-cols-3 items-start">
-          <div className="bg-white border rounded-lg p-5 shadow-sm lg:col-span-1">
-            <div className="flex justify-between items-center mb-4">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-900">Máquinas sin corte hoy</h2>
-                <p className="text-sm text-slate-500">Acciona antes de que impacte el MI del turno.</p>
-              </div>
-              <button
-                onClick={() => navigate("/maquinas")}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition"
-              >
-                <Calendar size={16} />
-                Registrar Corte
-              </button>
-            </div>
-
-            {machinesMissingToday.length === 0 ? (
-              <p className="text-sm text-slate-500">Todas las máquinas registraron corte hoy.</p>
-            ) : (
-              <ul className="space-y-3">
-                {machinesMissingToday.map((m) => (
-                  <li key={m.id} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-md px-3 py-2">
-                    <div className="flex items-center gap-3">
-                      <Printer className="text-blue-600" size={20} />
-                      <div>
-                        <div className="font-medium text-slate-800">{m.name || m.nombre || `Máquina ${m.id}`}</div>
-                        <div className="text-xs text-slate-500">Estado: {m.status || "—"}</div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => navigate(`/maquinas/${m.id}`)}
-                      className="text-sm px-3 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100"
-                    >
-                      Registrar
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="bg-white border rounded-lg p-5 shadow-sm lg:col-span-1">
-            <h3 className="text-lg font-semibold text-slate-900 mb-3">Alertas críticas</h3>
-            <AlertsPanel
-              pollInterval={60000}
-              onReponer={(insumo) => {
-                window.location.href = `/insumos/${insumo.id}`;
-              }}
-              onRegister={(machine) => {
-                window.location.href = `/maquinas/${machine.id}`;
-              }}
-            />
-          </div>
-
-          <div className="bg-white border rounded-lg p-5 shadow-sm lg:col-span-2">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-semibold text-slate-900">Breakdown por turnos</h3>
-              <span className="text-xs text-slate-500">Barras apiladas por turno / operador</span>
-            </div>
-            {shiftBarData ? (
-              <div className="h-64">
-                <Bar data={shiftBarData} options={shiftBarOptions} />
-              </div>
-            ) : (
-              <div className="h-32 flex flex-col items-center justify-center gap-2 text-sm text-slate-500">
-                <span>Sin datos de turnos aún.</span>
-                <span>Registra inicio/fin por turno para activar esta visualización.</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
     </div>
   );
 }

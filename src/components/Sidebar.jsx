@@ -20,7 +20,8 @@ import {
   FileText,
   Plus,
   TrendingUp,
-  ShoppingCart
+  ShoppingCart,
+  Package
 } from "lucide-react";
 import { isAdmin } from '../utils/auth';
 
@@ -52,8 +53,8 @@ export default function Sidebar() {
   const menuItems = [
     { path: "/", label: "Dashboard", icon: LayoutDashboard },
     { path: "/maquinas", label: "Maquinas", icon: Printer },
+    { path: "/inventario", label: "Inventario", icon: Package },
     { path: "/operacion", label: "Operación", icon: BarChart2 },
-   // { path: "/reportes", label: "Reportes", icon: BarChart2 },
     { path: "/trabajo-ocr", label: "Trabajos OCR", icon: FileImage },
     { path: "/clientes", label: "Clientes", icon: ClipboardList },
     { path: "/clientes-lealtad", label: "Clientes Lealtad", icon: Users },

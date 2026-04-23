@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText, Package, AlertTriangle } from "lucide-react";
+import { Plus, X, User, Trash2, Edit, History, Clock, Calendar, FileText, Package, AlertTriangle, RefreshCw } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import useCurrentUser from '../utils/useCurrentUser';
 import { useParams } from "react-router-dom";
@@ -43,13 +43,30 @@ export default function MaquinaDetalle() {
   const [corteModalOpen, setCorteModalOpen] = useState(false);
   const [corteMetros, setCorteMetros] = useState("");
   const [corteFecha, setCorteFecha] = useState(() => new Date().toISOString().slice(0,10));
+  const [inventoryItems, setInventoryItems] = useState([]);
+  const [selectedInventoryItem, setSelectedInventoryItem] = useState(null);
   const [corteOperador, setCorteOperador] = useState("");
   const [corteError, setCorteError] = useState("");
   const [corteTotalMes, setCorteTotalMes] = useState(0);
   const [corteLoading, setCorteLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("insumos"); // "insumos" o "historial"
+  const [activeTab, setActiveTab] = useState("trabajos");
   const [rollNumber, setRollNumber] = useState("");
   const [rollNumberSuggestion, setRollNumberSuggestion] = useState("");
+  const [todayJobs, setTodayJobs] = useState([]);
+  const [isLoadingJobs, setIsLoadingJobs] = useState(false);
+  const [jobHistory, setJobHistory] = useState([]);
+  const [isLoadingJobHistory, setIsLoadingJobHistory] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState("month");
+  const [historyFolioSearch, setHistoryFolioSearch] = useState("");
+  const [historyDateFrom, setHistoryDateFrom] = useState("");
+  const [historyDateTo, setHistoryDateTo] = useState("");
+  const [restockAmount, setRestockAmount] = useState("");
+  const [currentRollAction, setCurrentRollAction] = useState(null); // null | 'return' | 'discard'
+  const [currentActiveRoll, setCurrentActiveRoll] = useState(null);
+  const [rollHistory, setRollHistory] = useState([]);
+  const [isLoadingRolls, setIsLoadingRolls] = useState(false);
+  const [inventoryItemsMap, setInventoryItemsMap] = useState({});
+  const [activeRolls, setActiveRolls] = useState({});
   
 
   // --- HANDLERS PARA MODALES DE EDITAR Y ELIMINAR ---
@@ -96,6 +113,9 @@ export default function MaquinaDetalle() {
   const [criticalLevel, setCriticalLevel] = useState("");
   const [consumptionRatio, setConsumptionRatio] = useState("1");
   const [autoTrackConsumption, setAutoTrackConsumption] = useState(true);
+  const [newMaterialName, setNewMaterialName] = useState("");
+  const [newMaterialWidth, setNewMaterialWidth] = useState("");
+  const [configMode, setConfigMode] = useState("existing");
 
   // Nuevo estado para editar registros de producción
   const [editRecordModalOpen, setEditRecordModalOpen] = useState(false);
@@ -202,8 +222,39 @@ export default function MaquinaDetalle() {
     }
   };
 
+  const fetchAvailableInventory = async (supplyTypeId) => {
+    console.log('fetchAvailableInventory called with supplyTypeId:', supplyTypeId);
+    const isFilm = supplyTypeId === 7 || supplyTypeId === 15;
+    
+    const { data, error } = await supabase
+      .from('inventory')
+      .select('id, unit_id, quantity_remaining, quantity')
+      .eq('supply_type_id', supplyTypeId)
+      .in('status', isFilm ? ['in_stock'] : ['open', 'in_stock'])
+      .order('received_at', { ascending: true });
+    
+    console.log('inventory result:', data, 'error:', error);
+    if (!error) setInventoryItems(data || []);
+  };
+
+  const fetchActiveRolls = async () => {
+    const { data } = await supabase
+      .from('inventory')
+      .select('id, unit_id, supply_type_id, quantity_remaining')
+      .eq('machine_id', parseInt(id))
+      .eq('status', 'in_machine')
+      .in('supply_type_id', [7, 15]);
+    
+    if (!data) return;
+    const map = {};
+    data.forEach(r => { map[r.supply_type_id] = r; });
+    setActiveRolls(map);
+  };
+
   useEffect(() => {
     fetchProductionRecords();
+    fetchTodayJobs();
+    fetchActiveRolls();
   }, [id]);
 
   const fetchProductionRecords = async () => {
@@ -239,6 +290,134 @@ export default function MaquinaDetalle() {
       console.debug('fetchProductionRecords -> debug error', e);
     }
     setIsLoadingProduction(false);
+  };
+
+  const fetchInventoryItems = async (jobs) => {
+    const ids = jobs
+      .filter(j => j.inventory_item_id)
+      .map(j => j.inventory_item_id);
+    if (ids.length === 0) return;
+
+    const { data } = await supabase
+      .from('inventory')
+      .select('id, unit_id, display_name, plotter_catalog_id')
+      .in('id', ids);
+
+    if (!data) return;
+
+    const { data: catalog } = await supabase
+      .from('plotter_materials_catalog')
+      .select('id, material_type_id, width_id');
+
+    const { data: widths } = await supabase
+      .from('plotter_material_widths')
+      .select('id, label');
+
+    const widthsById = {};
+    (widths || []).forEach(w => { widthsById[w.id] = w; });
+
+    const catalogById = {};
+    (catalog || []).forEach(c => { catalogById[c.id] = c; });
+
+    const map = {};
+    (data || []).forEach(item => {
+      const cat = catalogById[item.plotter_catalog_id];
+      const widthLabel = cat ? widthsById[cat.width_id]?.label || '' : '';
+      map[item.id] = `${item.display_name || ''} ${widthLabel}`.trim() || item.unit_id;
+    });
+
+    setInventoryItemsMap(map);
+  };
+
+  const fetchTodayJobs = async () => {
+    setIsLoadingJobs(true);
+    const today = getLocalDateString();
+    const { data, error } = await supabase
+      .from('machine_daily_prints')
+      .select('id, folio, job_description, meters_printed, registered_by, created_at, inventory_item_id')
+      .eq('machine_id', id)
+      .eq('date', today)
+      .order('created_at', { ascending: true });
+    if (!error) {
+      setTodayJobs(data || []);
+      await fetchInventoryItems(data || []);
+    }
+    setIsLoadingJobs(false);
+  };
+
+  const fetchJobHistory = async (filter = historyFilter) => {
+    setIsLoadingJobHistory(true);
+    const today = new Date();
+    let fromDate = null;
+
+    if (filter === "week") {
+      const d = new Date(today);
+      d.setDate(today.getDate() - 7);
+      fromDate = getLocalDateString(d);
+    } else if (filter === "month") {
+      const d = new Date(today);
+      d.setMonth(today.getMonth() - 1);
+      fromDate = getLocalDateString(d);
+    } else if (filter === "custom") {
+      fromDate = historyDateFrom || null;
+    }
+
+    let query = supabase
+      .from('machine_daily_prints')
+      .select('id, folio, job_description, meters_printed, registered_by, date, created_at, inventory_item_id')
+      .eq('machine_id', id)
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    if (fromDate) query = query.gte('date', fromDate);
+    if (filter === "custom" && historyDateTo) query = query.lte('date', historyDateTo);
+    if (historyFolioSearch.trim()) query = query.ilike('folio', `%${historyFolioSearch.trim()}%`);
+
+    const { data, error } = await query;
+    if (!error) {
+      setJobHistory(data || []);
+      await fetchInventoryItems(data || []);
+    }
+    setIsLoadingJobHistory(false);
+  };
+
+  const fetchRollHistory = async () => {
+    setIsLoadingRolls(true);
+    
+    // Determinar pool de la máquina
+    const poolMap = { 1: 'DTF Textil', 2: 'DTF Textil', 3: 'UV DTF', 4: 'Plotter' };
+    const pool = poolMap[parseInt(id)] || 'DTF Textil';
+    const isFilmMachine = parseInt(id) !== 4;
+
+    // Traer film de esta máquina específica
+    const { data: filmRolls } = await supabase
+      .from('inventory')
+      .select('*, supply_types(name, unit, category)')
+      .eq('machine_id', parseInt(id))
+      .in('supply_type_id', [7, 15])
+      .order('received_at', { ascending: false });
+
+    // Traer tintas del pool
+    const { data: inkRolls } = await supabase
+      .from('inventory')
+      .select('*, supply_types(name, unit, category)')
+      .eq('pool', pool)
+      .not('supply_type_id', 'in', '(7,15)')
+      .order('received_at', { ascending: false });
+
+    // Hacer join manual con supply_types
+    const supplyTypesMap = {};
+    [...(filmRolls || []), ...(inkRolls || [])].forEach(item => {
+      if (item.supply_types) supplyTypesMap[item.supply_type_id] = item.supply_types;
+    });
+
+    const combined = [
+      ...(filmRolls || []).map(r => ({ ...r, source: 'film' })),
+      ...(inkRolls || []).map(r => ({ ...r, source: 'ink' }))
+    ].sort((a, b) => new Date(b.received_at) - new Date(a.received_at));
+
+    setRollHistory(combined);
+    setIsLoadingRolls(false);
   };
 
   // Calcular total del mes actual y guardar en state
@@ -314,23 +493,33 @@ export default function MaquinaDetalle() {
     return `${prefix}-${supplyTypeId}-${next}`;
   };
 
+  // Helper para determinar si un insumo es film
+  const isFilmSupply = (supply) => {
+    const name = supply?.supply_types?.name || "";
+    return name.includes("Film");
+  };
+
   // Abrir modal de reposición
   const openRestockModal = async (supply) => {
     setSelectedSupply(supply);
-    setRestockModalOpen(true);
-    setNewStock("");
-    setBatchNumber("");
-    setExpiryDate("");
-    setSupplierName("");
-    setUnitCost("");
-    setNotes("");
+    setSelectedInventoryItem(null);
+    setInventoryItems([]);
+    setRestockAmount("");
     setRecordedBy(currentUser?.name || currentUser?.email || "Sistema");
-    const suggestion = await generateRollNumber(
-      supply.supply_type_id, 
-      supply.machine_id
-    );
-    setRollNumberSuggestion(suggestion);
-    setRollNumber(suggestion);
+    setNotes("");
+    await fetchAvailableInventory(supply.supply_type_id);
+    if (isFilmSupply(supply)) {
+      const { data: activeRoll } = await supabase
+        .from('inventory')
+        .select('id, unit_id, quantity_remaining')
+        .eq('supply_type_id', supply.supply_type_id)
+        .eq('status', 'in_machine')
+        .eq('machine_id', supply.machine_id)
+        .maybeSingle();
+      setCurrentActiveRoll(activeRoll || null);
+      setCurrentRollAction(null);
+    }
+    setRestockModalOpen(true);
   };
 
   // Cerrar modal de reposición
@@ -345,6 +534,8 @@ export default function MaquinaDetalle() {
     setNotes("");
     setRollNumber("");
     setRollNumberSuggestion("");
+    setCurrentActiveRoll(null);
+    setCurrentRollAction(null);
   };
 
   const closeHistoryModal = () => {
@@ -355,105 +546,187 @@ export default function MaquinaDetalle() {
 
   // Guardar reposición de stock
   const handleRestock = async () => {
-    if (!selectedSupply || !newStock || parseFloat(newStock) < 0) {
-      alert("Por favor, ingresa una cantidad válida.");
-      return;
-    }
-
+    if (!selectedSupply) return;
     if (!recordedBy.trim()) {
-      alert("Por favor, ingresa quién está registrando el movimiento.");
+      alert("Selecciona quién registra.");
       return;
     }
 
-    if (!rollNumber.trim()) {
-      alert("Ingresa el número de rollo o unidad.");
+    const isFilm = isFilmSupply(selectedSupply);
+
+    if (isFilm && !selectedInventoryItem) {
+      alert("Selecciona el rollo del inventario.");
+      return;
+    }
+    if (!isFilm && (!restockAmount || parseFloat(restockAmount) <= 0)) {
+      alert("Ingresa la cantidad que agregas al tanque.");
       return;
     }
 
     try {
+      const nowIso = new Date().toISOString();
       const quantityBefore = parseFloat(selectedSupply.current_stock);
-      const quantityChanged = parseFloat(newStock);
-      const quantityAfter = quantityBefore + quantityChanged;
-      const recordedAtIso = new Date().toISOString();
+      let quantityAdded = isFilm
+        ? parseFloat(selectedInventoryItem.quantity_remaining)
+        : 0;
+      
+      if (isFilm) {
+        // Film: manejar rollo actual antes de montar el nuevo
+        if (currentActiveRoll) {
+          if (!currentRollAction) {
+            alert("Indica qué hacer con el rollo actual antes de continuar.");
+            return;
+          }
+          if (currentRollAction === 'return') {
+            await supabase
+              .from('inventory')
+              .update({
+                status: 'in_stock',
+                location: 'bodega',
+                machine_id: null
+              })
+              .eq('id', currentActiveRoll.id);
+          } else if (currentRollAction === 'discard') {
+            await supabase
+              .from('inventory')
+              .update({
+                status: 'depleted',
+                depleted_at: nowIso,
+                notes: `Descartado con ${currentActiveRoll.quantity_remaining}m restantes al cambiar rollo`
+              })
+              .eq('id', currentActiveRoll.id);
+          }
+        }
+        
+        // Marcar unidad nueva como in_machine en inventory
+        const { error: invError } = await supabase
+          .from('inventory')
+          .update({
+            status: 'in_machine',
+            location: 'maquina',
+            assigned_at: nowIso,
+            machine_id: selectedSupply.machine_id
+          })
+          .eq('id', selectedInventoryItem.id);
+        if (invError) throw invError;
+      } else {
+        if (!selectedInventoryItem) {
+          alert("Selecciona la botella de la que estás vertiendo.");
+          return;
+        }
+        if (!restockAmount || parseFloat(restockAmount) <= 0) {
+          alert("Ingresa la cantidad que agregas al tanque.");
+          return;
+        }
+        
+        const mlToAdd = parseFloat(restockAmount);
+        const newRemaining = Number(
+          (selectedInventoryItem.quantity_remaining - mlToAdd).toFixed(3)
+        );
+        const isDepleted = newRemaining <= 0;
+        
+        await supabase
+          .from('inventory')
+          .update({
+            quantity_remaining: Math.max(0, newRemaining),
+            status: isDepleted ? 'depleted' : 'open',
+            depleted_at: isDepleted ? nowIso : null
+          })
+          .eq('id', selectedInventoryItem.id);
+          
+        quantityAdded = mlToAdd;
+      }
+      
+      const quantityAfter = isFilm 
+        ? quantityAdded  // Para film: stock = metros del nuevo rollo
+        : quantityBefore + quantityAdded;  // Para tinta: stock = tanque + lo que se agrega
 
-      // Registrar el movimiento en el historial
-      const { error: historyError } = await supabase
+      // Actualizar stock en machine_supplies
+      const { error: supplyError } = await supabase
+        .from('machine_supplies')
+        .update({
+          current_stock: quantityAfter,
+          last_updated: nowIso,
+          updated_by: recordedBy.trim()
+        })
+        .eq('id', selectedSupply.id);
+      if (supplyError) throw supplyError;
+
+      // Registrar movimiento
+      await supabase
         .from('supply_movements')
-        .insert([
-          {
+        .insert([{
+          machine_id: selectedSupply.machine_id,
+          supply_type_id: selectedSupply.supply_type_id,
+          movement_type: isFilm ? 'transfer' : 'consumption',
+          quantity_before: isFilm ? quantityBefore : Number(selectedInventoryItem.quantity_remaining),
+          quantity_after: isFilm ? quantityAfter : Number((selectedInventoryItem.quantity_remaining - quantityAdded).toFixed(3)),
+          quantity_changed: isFilm ? quantityAdded : -quantityAdded,
+          recorded_by: recordedBy.trim(),
+          inventory_item_id: selectedInventoryItem.id,
+          tank_before: isFilm ? null : quantityBefore,
+          tank_after: isFilm ? null : quantityAfter,
+          notes: isFilm
+            ? `Rollo ${selectedInventoryItem.unit_id} montado en máquina.${notes ? ' ' + notes : ''}`
+            : `Vertido al tanque desde ${selectedInventoryItem.unit_id}.${notes ? ' ' + notes : ''}`,
+          recorded_at: nowIso
+        }]);
+
+      if (!isFilm) {
+        await supabase
+          .from('supply_movements')
+          .insert([{
             machine_id: selectedSupply.machine_id,
             supply_type_id: selectedSupply.supply_type_id,
             movement_type: 'restock',
             quantity_before: quantityBefore,
             quantity_after: quantityAfter,
-            quantity_changed: quantityChanged,
-            batch_number: batchNumber || null,
-            expiry_date: expiryDate || null,
-            unit_cost: unitCost ? parseFloat(unitCost) : null,
-            supplier: supplierName || null,
-            notes: notes || null,
+            quantity_changed: quantityAdded,
             recorded_by: recordedBy.trim(),
-            recorded_at: recordedAtIso,
-          }
-        ]);
+            inventory_item_id: null,
+            tank_before: quantityBefore,
+            tank_after: quantityAfter,
+            notes: `Reposición de tanque desde ${selectedInventoryItem.unit_id}.${notes ? ' ' + notes : ''}`,
+            recorded_at: nowIso
+          }]);
+      }
 
-      if (historyError) throw historyError;
-
-      // Actualizar el stock actual
-      const updateData = {
-        current_stock: quantityAfter,
-        last_updated: recordedAtIso,
-        updated_by: recordedBy.trim()
-      };
-
-      if (unitCost) updateData.cost_per_unit = parseFloat(unitCost);
-      if (supplierName) updateData.supplier = supplierName;
-
-      const { error: updateError } = await supabase
-        .from('machine_supplies')
-        .update(updateData)
-        .eq('id', selectedSupply.id);
-
-      if (updateError) throw updateError;
-
-      await supabase
-        .from('supply_rolls')
-        .insert([{
-          machine_id: selectedSupply.machine_id,
-          supply_type_id: selectedSupply.supply_type_id,
-          roll_number: rollNumber.trim(),
-          initial_stock: quantityChanged,
-          current_stock: quantityChanged,
-          status: 'active',
-          received_by: recordedBy.trim(),
-          received_at: recordedAtIso,
-          cost: unitCost ? parseFloat(unitCost) : null,
-          supplier: supplierName || null,
-          batch_number: batchNumber || null,
-          notes: notes || null,
-          meters_yielded: 0
-        }]);
-
-      alert(`Stock actualizado correctamente. ${selectedSupply.supply_types.name}: ${quantityAfter} ${selectedSupply.supply_types.unit}`);
+      alert(`${selectedSupply.supply_types.name} actualizado. +${quantityAdded}`);
+      setSelectedInventoryItem(null);
+      setInventoryItems([]);
+      setRestockAmount("");
       closeRestockModal();
       fetchMachineSupplies();
 
     } catch (error) {
-      console.error('Error al actualizar stock:', error);
-      alert('Hubo un error al actualizar el stock: ' + error.message);
+      console.error('Error en restock:', error);
+      alert('Error al reponer stock: ' + error.message);
     }
   };
 
   // Obtener historial de un insumo
   const fetchSupplyHistory = async (machineId, supplyTypeId) => {
     setIsLoadingHistory(true);
-    const { data, error } = await supabase
+    
+    const isFilm = supplyTypeId === 7 || supplyTypeId === 15;
+
+    let query = supabase
       .from('supply_movements')
       .select('*')
       .eq('machine_id', machineId)
       .eq('supply_type_id', supplyTypeId)
       .order('recorded_at', { ascending: false })
       .limit(20);
+
+    if (isFilm) {
+      // Para film: mostrar todos los movimientos (consumo automático e inventory)
+      // No filtrar por inventory_item_id
+    } else {
+      // Para tintas: solo movimientos del tanque (sin inventory_item_id)
+      query = query.is('inventory_item_id', null);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error('Error al obtener historial:', error);
@@ -523,6 +796,9 @@ export default function MaquinaDetalle() {
     setCriticalLevel("");
     setConsumptionRatio("1");
     setAutoTrackConsumption(true);
+    setNewMaterialName("");
+    setNewMaterialWidth("");
+    setConfigMode("existing");
   };
 
   // Agregar insumo a máquina
@@ -606,7 +882,8 @@ export default function MaquinaDetalle() {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      timeZone: 'America/Chihuahua'
     });
   };
 
@@ -746,15 +1023,36 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-4 mb-6 border-b">
+      <div className="flex gap-4 mb-6 border-b overflow-x-auto">
         <button
-          className={`pb-2 px-4 font-semibold border-b-2 ${activeTab === "insumos" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500"}`}
+          className={`pb-2 px-4 font-semibold border-b-2 whitespace-nowrap ${activeTab === "trabajos" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500"}`}
+          onClick={() => { setActiveTab("trabajos"); fetchTodayJobs(); }}
+        >
+          Trabajos de Hoy
+        </button>
+        <button
+          className={`pb-2 px-4 font-semibold border-b-2 whitespace-nowrap ${activeTab === "historial_trabajos" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500"}`}
+          onClick={() => { setActiveTab("historial_trabajos"); fetchJobHistory(); }}
+        >
+          Historial de Trabajos
+        </button>
+        <button
+          className={`pb-2 px-4 font-semibold border-b-2 whitespace-nowrap ${activeTab === "insumos" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500"}`}
           onClick={() => setActiveTab("insumos")}
         >
           Control de Insumos
         </button>
         <button
-          className={`pb-2 px-4 font-semibold border-b-2 ${activeTab === "historial" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500"}`}
+          className={`pb-2 px-4 font-semibold border-b-2 whitespace-nowrap 
+            ${activeTab === "rollos" 
+              ? "border-blue-600 text-blue-600" 
+              : "border-transparent text-gray-500"}`}
+          onClick={() => { setActiveTab("rollos"); fetchRollHistory(); }}
+        >
+          Rollos e Insumos
+        </button>
+        <button
+          className={`pb-2 px-4 font-semibold border-b-2 whitespace-nowrap ${activeTab === "historial" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500"}`}
           onClick={() => setActiveTab("historial")}
         >
           Historial de Metros
@@ -762,6 +1060,356 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
       </div>
 
         {/* Contenido de la máquina seleccionada */}
+        {activeTab === "trabajos" && (
+          <div>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">
+                Trabajos de hoy — {getLocalDateString()}
+              </h2>
+              <button
+                onClick={fetchTodayJobs}
+                className="flex items-center gap-2 px-3 py-2 bg-gray-100 
+                  text-gray-700 rounded hover:bg-gray-200 text-sm"
+              >
+                <RefreshCw size={14} />
+                Actualizar
+              </button>
+            </div>
+
+            {isLoadingJobs ? (
+              <p className="text-center text-gray-500 py-8">Cargando...</p>
+            ) : todayJobs.length === 0 ? (
+              <div className="text-center text-gray-400 py-12">
+                <p className="text-lg">Sin trabajos registrados hoy</p>
+                <p className="text-sm mt-1">
+                  Registra trabajos desde la pantalla principal
+                </p>
+              </div>
+            ) : (
+              <div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="px-4 py-3 text-left font-semibold text-gray-600">
+                          Folio
+                        </th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-600">
+                          Descripción
+                        </th>
+                        {parseInt(id) === 4 && (
+                          <th className="px-4 py-3 text-left font-semibold text-gray-600">
+                            Material
+                          </th>
+                        )}
+                        <th className="px-4 py-3 text-right font-semibold text-gray-600">
+                          Metros
+                        </th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-600">
+                          Hora
+                        </th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-600">
+                          Operador
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {todayJobs.map((job, idx) => (
+                        <tr 
+                          key={job.id} 
+                          className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
+                        >
+                          <td className="px-4 py-3 font-mono font-semibold text-blue-600">
+                            {job.folio || '—'}
+                          </td>
+                          <td className="px-4 py-3 text-gray-700">
+                            {job.job_description || '—'}
+                          </td>
+                          {parseInt(id) === 4 && (
+                            <td className="px-4 py-3 text-gray-600 text-xs">
+                              {job.inventory_item_id 
+                                ? inventoryItemsMap[job.inventory_item_id] || '—'
+                                : '—'}
+                            </td>
+                          )}
+                          <td className="px-4 py-3 text-right font-semibold">
+                            {Number(job.meters_printed).toFixed(2)} m
+                          </td>
+                          <td className="px-4 py-3 text-gray-500 text-xs">
+                            {new Date(job.created_at).toLocaleTimeString('es-MX', {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-gray-500">
+                            {job.registered_by || '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-gray-300 bg-blue-50">
+                        <td className="px-4 py-3 font-bold" colSpan={2}>
+                          Total del día
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-blue-700">
+                          {todayJobs
+                            .reduce((sum, j) => sum + Number(j.meters_printed), 0)
+                            .toFixed(2)} m
+                        </td>
+                        <td colSpan={2}></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "historial_trabajos" && (
+          <div>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">Historial de Trabajos</h2>
+              <button
+                onClick={() => fetchJobHistory()}
+                className="flex items-center gap-2 px-3 py-2 bg-gray-100 
+                  text-gray-700 rounded hover:bg-gray-200 text-sm"
+              >
+                <RefreshCw size={14} />
+                Actualizar
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-3 mb-4">
+              <div className="flex gap-2">
+                {["week", "month", "custom"].map(f => (
+                  <button
+                    key={f}
+                    onClick={() => {
+                      setHistoryFilter(f);
+                      if (f !== "custom") fetchJobHistory(f);
+                    }}
+                    className={`px-3 py-1 rounded text-sm font-medium border
+                      ${historyFilter === f
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`}
+                  >
+                    {f === "week" ? "Última semana" : f === "month" ? "Último mes" : "Personalizado"}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                placeholder="Buscar folio..."
+                value={historyFolioSearch}
+                onChange={e => setHistoryFolioSearch(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && fetchJobHistory()}
+                className="border rounded px-3 py-1 text-sm w-36"
+              />
+              {historyFilter === "custom" && (
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="date"
+                    value={historyDateFrom}
+                    onChange={e => setHistoryDateFrom(e.target.value)}
+                    className="border rounded px-3 py-1 text-sm"
+                  />
+                  <span className="text-gray-400 text-sm">a</span>
+                  <input
+                    type="date"
+                    value={historyDateTo}
+                    onChange={e => setHistoryDateTo(e.target.value)}
+                    className="border rounded px-3 py-1 text-sm"
+                  />
+                  <button
+                    onClick={() => fetchJobHistory("custom")}
+                    className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+                  >
+                    Buscar
+                  </button>
+                </div>
+              )}
+            </div>
+            {isLoadingJobHistory ? (
+              <p className="text-center text-gray-500 py-8">Cargando...</p>
+            ) : jobHistory.length === 0 ? (
+              <div className="text-center text-gray-400 py-12">
+                <p className="text-lg">Sin registros en este período</p>
+              </div>
+            ) : (
+              <div>
+                <div className="text-sm text-gray-500 mb-3">
+                  {jobHistory.length} trabajos · {jobHistory
+                    .reduce((sum, j) => sum + Number(j.meters_printed), 0)
+                    .toFixed(2)} m total
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="px-4 py-3 text-left font-semibold text-gray-600">Fecha</th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-600">Folio</th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-600">Descripción</th>
+                        {parseInt(id) === 4 && (
+                          <th className="px-4 py-3 text-left font-semibold text-gray-600">Material</th>
+                        )}
+                        <th className="px-4 py-3 text-right font-semibold text-gray-600">Metros</th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-600">Hora</th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-600">Operador</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {jobHistory.map((job, idx) => (
+                        <tr key={job.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                          <td className="px-4 py-3 text-gray-500 text-xs">
+                            {String(job.date).slice(0, 10)}
+                          </td>
+                          <td className="px-4 py-3 font-mono font-semibold text-blue-600">
+                            {job.folio || '—'}
+                          </td>
+                          <td className="px-4 py-3 text-gray-700">{job.job_description || '—'}</td>
+                          {parseInt(id) === 4 && (
+                            <td className="px-4 py-3 text-gray-600 text-xs">
+                              {job.inventory_item_id 
+                                ? inventoryItemsMap[job.inventory_item_id] || '—'
+                                : '—'}
+                            </td>
+                          )}
+                          <td className="px-4 py-3 text-right font-semibold">
+                            {Number(job.meters_printed).toFixed(2)} m
+                          </td>
+                          <td className="px-4 py-3 text-gray-500 text-xs">
+                            {new Date(job.created_at).toLocaleTimeString('es-MX', {
+                              hour: '2-digit', minute: '2-digit'
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-gray-500">{job.registered_by || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-gray-300 bg-blue-50">
+                        <td className="px-4 py-3 font-bold" colSpan={3}>Total del período</td>
+                        <td className="px-4 py-3 text-right font-bold text-blue-700">
+                          {jobHistory.reduce((sum, j) => 
+                            sum + Number(j.meters_printed), 0).toFixed(2)} m
+                        </td>
+                        <td colSpan={2}></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "rollos" && (
+          <div>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">Historial de Rollos e Insumos</h2>
+              <button
+                onClick={fetchRollHistory}
+                className="flex items-center gap-2 px-3 py-2 bg-gray-100 
+                  text-gray-700 rounded hover:bg-gray-200 text-sm"
+              >
+                <RefreshCw size={14} />
+                Actualizar
+              </button>
+            </div>
+
+            {isLoadingRolls ? (
+              <p className="text-center text-gray-500 py-8">Cargando...</p>
+            ) : rollHistory.length === 0 ? (
+              <div className="text-center text-gray-400 py-12">
+                <p className="text-lg">Sin registros</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b">
+                      <th className="px-4 py-3 text-left font-semibold text-gray-600">ID</th>
+                      <th className="px-4 py-3 text-left font-semibold text-gray-600">Insumo</th>
+                      <th className="px-4 py-3 text-right font-semibold text-gray-600">Inicial</th>
+                      <th className="px-4 py-3 text-right font-semibold text-gray-600">Restante</th>
+                      <th className="px-4 py-3 text-right font-semibold text-gray-600">Consumido</th>
+                      <th className="px-4 py-3 text-left font-semibold text-gray-600">Estado</th>
+                      <th className="px-4 py-3 text-left font-semibold text-gray-600">Entrada</th>
+                      <th className="px-4 py-3 text-left font-semibold text-gray-600">Agotado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rollHistory.map((roll, idx) => {
+                      const consumed = Number(roll.quantity) - Number(roll.quantity_remaining);
+                      const pct = roll.quantity > 0 
+                        ? ((consumed / roll.quantity) * 100).toFixed(0) 
+                        : 0;
+                      const statusColors = {
+                        in_stock:   'bg-green-100 text-green-700',
+                        open:       'bg-yellow-100 text-yellow-700',
+                        in_machine: 'bg-blue-100 text-blue-700',
+                        depleted:   'bg-gray-100 text-gray-500',
+                      };
+                      const statusLabels = {
+                        in_stock:   'En bodega',
+                        open:       'Abierta',
+                        in_machine: 'En máquina',
+                        depleted:   'Agotada',
+                      };
+                      return (
+                        <tr key={roll.id} 
+                          className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                          <td className="px-4 py-3 font-mono font-semibold text-blue-600">
+                            {roll.unit_id}
+                          </td>
+                          <td className="px-4 py-3 text-gray-700">
+                            {roll.supply_types?.name || '—'}
+                            {roll.source === 'ink' && (
+                              <span className="ml-1 text-xs text-gray-400">(pool)</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {roll.quantity} {roll.supply_types?.unit}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {roll.quantity_remaining} {roll.supply_types?.unit}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <div className="w-16 bg-gray-200 rounded-full h-1.5">
+                                <div
+                                  className="bg-blue-500 h-1.5 rounded-full"
+                                  style={{ width: `${Math.min(pct, 100)}%` }}
+                                />
+                              </div>
+                              <span className="text-xs text-gray-500">{pct}%</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium 
+                              ${statusColors[roll.status] || 'bg-gray-100 text-gray-500'}`}>
+                              {statusLabels[roll.status] || roll.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-gray-500 text-xs">
+                            {new Date(roll.received_at).toLocaleDateString('es-MX')}
+                          </td>
+                          <td className="px-4 py-3 text-gray-500 text-xs">
+                            {roll.depleted_at 
+                              ? new Date(roll.depleted_at).toLocaleDateString('es-MX')
+                              : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === "insumos" && (
           <div className="space-y-4">
           <h3 className="text-lg font-semibold flex items-center gap-2">
@@ -792,6 +1440,20 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
                     <p className={`text-2xl font-bold ${getStatusTextColor(status)} mb-1`}>
                       {supply.current_stock} {supply.supply_types.unit}
                     </p>
+                    
+                    {(supply.supply_types.name.includes('Film')) && 
+                      activeRolls[supply.supply_type_id] && (
+                      <div className="flex items-center gap-2 mt-1 mb-2">
+                        <span className="text-xs text-gray-500">Rollo activo:</span>
+                        <span className="text-xs font-mono font-semibold text-blue-600 
+                          bg-blue-50 px-2 py-0.5 rounded">
+                          {activeRolls[supply.supply_type_id].unit_id}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          ({activeRolls[supply.supply_type_id].quantity_remaining}m)
+                        </span>
+                      </div>
+                    )}
                     
                     <div className="text-sm text-gray-600 mb-3">
                       <p>Mínimo: {supply.minimum_level} {supply.supply_types.unit}</p>
@@ -864,7 +1526,6 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
                     <td className="px-4 py-2">{Number(r.meters_printed).toFixed(2)} m</td>
                     <td className="px-4 py-2">{r.registered_by || '-'}</td>
                     <td className="px-4 py-2">
-                      {/* Aquí puedes poner un botón para editar */}
                       <button
                         className="text-blue-600 hover:underline"
                         onClick={() => openEditRecord(r)}
@@ -888,50 +1549,143 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
             >
               <X />
             </button>
-            
-           <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-            <Package className="text-green-600" size={24} />
-            Reponer Stock
+
+            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+              <Package className="text-green-600" size={24} />
+              Reponer Stock
             </h2>
-            
+
             <div className="mb-4 p-3 bg-gray-50 rounded">
               <p><strong>Insumo:</strong> {selectedSupply.supply_types.name}</p>
-              <p><strong>Máquina:</strong> {selectedMachine?.name || ""}</p>
               <p><strong>Stock actual:</strong> {selectedSupply.current_stock} {selectedSupply.supply_types.unit}</p>
             </div>
 
             <div className="flex flex-col gap-4">
+              {isFilmSupply(selectedSupply) ? (
+                <div>
+                  <label className="block text-gray-700 font-bold mb-2">
+                    Rollo disponible en bodega *
+                  </label>
+                  {inventoryItems.length === 0 ? (
+                    <div className="bg-red-50 border border-red-200 text-red-700 
+                      px-3 py-2 rounded text-sm">
+                      No hay rollos en bodega. Registra una entrada en Inventario primero.
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {inventoryItems.map(item => (
+                        <button
+                          key={item.id}
+                          onClick={() => setSelectedInventoryItem(item)}
+                          className={`w-full text-left px-4 py-3 rounded border transition
+                            ${selectedInventoryItem?.id === item.id
+                              ? 'border-green-500 bg-green-50'
+                              : 'border-gray-200 hover:border-green-300 hover:bg-gray-50'}`}
+                        >
+                          <div className="font-mono font-semibold text-blue-700">
+                            {item.unit_id}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {item.quantity_remaining} / {item.quantity} metros disponibles
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-gray-700 font-bold mb-2">
+                    Botella disponible *
+                  </label>
+                  {inventoryItems.length === 0 ? (
+                    <div className="bg-red-50 border border-red-200 text-red-700 
+                      px-3 py-2 rounded text-sm">
+                      No hay botellas disponibles. Registra una entrada en Inventario primero.
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {inventoryItems.map(item => (
+                        <button
+                          key={item.id}
+                          onClick={() => setSelectedInventoryItem(item)}
+                          className={`w-full text-left px-4 py-3 rounded border transition
+                            ${selectedInventoryItem?.id === item.id
+                              ? 'border-green-500 bg-green-50'
+                              : 'border-gray-200 hover:border-green-300 hover:bg-gray-50'}`}
+                        >
+                          <div className="font-mono font-semibold text-blue-700">
+                            {item.unit_id}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {item.quantity_remaining} / {item.quantity} ml disponibles
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {selectedInventoryItem && (
+                    <div className="bg-blue-50 p-3 rounded text-sm mt-2">
+                      <p><strong>Botella:</strong> {selectedInventoryItem.unit_id}</p>
+                      <p><strong>Stock actual tanque:</strong> {selectedSupply.current_stock} ml</p>
+                      <p><strong>Cantidad a agregar:</strong></p>
+                      <input
+                        type="number"
+                        value={restockAmount}
+                        onChange={e => setRestockAmount(e.target.value)}
+                        className="border rounded px-3 py-2 w-full mt-1"
+                        min="0"
+                        step="0.01"
+                        placeholder="ml que agregas al tanque"
+                      />
+                      {restockAmount && (
+                        <p className="mt-1"><strong>Stock final tanque:</strong> {
+                          (parseFloat(selectedSupply.current_stock) + 
+                          parseFloat(restockAmount || 0)).toFixed(0)
+                        } ml</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {selectedInventoryItem && currentActiveRoll && (
+                <div className="bg-yellow-50 border border-yellow-300 rounded p-3">
+                  <p className="text-sm font-semibold text-yellow-800 mb-2">
+                    ⚠ Rollo actual: {currentActiveRoll.unit_id} 
+                    ({currentActiveRoll.quantity_remaining}m restantes)
+                  </p>
+                  <p className="text-xs text-yellow-700 mb-3">
+                    ¿Qué hacemos con este rollo?
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setCurrentRollAction('return')}
+                      className={`flex-1 px-3 py-2 rounded text-sm font-medium border
+                        ${currentRollAction === 'return'
+                          ? 'bg-green-600 text-white border-green-600'
+                          : 'bg-white text-gray-600 border-gray-300 hover:border-green-400'}`}
+                    >
+                      Regresar a bodega
+                    </button>
+                    <button
+                      onClick={() => setCurrentRollAction('discard')}
+                      className={`flex-1 px-3 py-2 rounded text-sm font-medium border
+                        ${currentRollAction === 'discard'
+                          ? 'bg-red-600 text-white border-red-600'
+                          : 'bg-white text-gray-600 border-gray-300 hover:border-red-400'}`}
+                    >
+                      Descartar
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-gray-700 font-bold mb-2">
-                  Número de rollo/unidad *
+                  Registrado por *
                 </label>
-                <input
-                  type="text"
-                  value={rollNumber}
-                  onChange={e => setRollNumber(e.target.value)}
-                  className="border rounded px-3 py-2 w-full"
-                  placeholder="Número de identificación"
-                />
-                <p className="text-xs text-gray-400 mt-1">
-                  Sugerido: {rollNumberSuggestion} — puedes modificarlo
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-gray-700 font-bold mb-2">Cantidad a agregar *</label>
-                <input
-                  type="number"
-                  placeholder="Metros o unidades que llegan"
-                  value={newStock}
-                  onChange={(e) => setNewStock(e.target.value)}
-                  className="border rounded px-3 py-2 w-full"
-                  min="0"
-                  step="0.01"
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-700 font-bold mb-2">Registrado por *</label>
                 <select
                   value={recordedBy}
                   onChange={e => setRecordedBy(e.target.value)}
@@ -942,55 +1696,7 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
                   <option value="Daniela">Daniela</option>
                   <option value="Karla">Karla</option>
                   <option value="Eduardo">Eduardo</option>
-                  <option value="Operador 1">Operador 1</option>
-                  <option value="Operador 2">Operador 2</option>
-                  <option value="Operador 3">Operador 3</option>
                 </select>
-              </div>
-
-              <div>
-                <label className="block text-gray-700 font-bold mb-2">Número de lote</label>
-                <input
-                  type="text"
-                  placeholder="Lote del producto"
-                  value={batchNumber}
-                  onChange={(e) => setBatchNumber(e.target.value)}
-                  className="border rounded px-3 py-2 w-full"
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-700 font-bold mb-2">Fecha de caducidad</label>
-                <input
-                  type="date"
-                  value={expiryDate}
-                  onChange={(e) => setExpiryDate(e.target.value)}
-                  className="border rounded px-3 py-2 w-full"
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-700 font-bold mb-2">Proveedor</label>
-                <input
-                  type="text"
-                  placeholder="Nombre del proveedor"
-                  value={supplierName}
-                  onChange={(e) => setSupplierName(e.target.value)}
-                  className="border rounded px-3 py-2 w-full"
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-700 font-bold mb-2">Costo por unidad</label>
-                <input
-                  type="number"
-                  placeholder="Costo por unidad"
-                  value={unitCost}
-                  onChange={(e) => setUnitCost(e.target.value)}
-                  className="border rounded px-3 py-2 w-full"
-                  min="0"
-                  step="0.01"
-                />
               </div>
 
               <div>
@@ -998,27 +1704,20 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
                 <textarea
                   placeholder="Observaciones adicionales"
                   value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="border rounded px-3 py-2 w-full h-20 resize-none"
+                  onChange={e => setNotes(e.target.value)}
+                  className="border rounded px-3 py-2 w-full h-16 resize-none"
                 />
               </div>
 
-              {newStock && (
-                <div className="bg-blue-50 p-3 rounded text-sm">
-                  <p>
-                    <strong>Cambio:</strong> {parseFloat(newStock) > 0 ? '+' : ''}{parseFloat(newStock).toFixed(2)} {selectedSupply.supply_types.unit}
-                  </p>
-                  <p>
-                    <strong>Stock final:</strong> {(parseFloat(newStock) + selectedSupply.current_stock).toFixed(2)} {selectedSupply.supply_types.unit}
-                  </p>
-                </div>
-              )}
-
               <button
                 onClick={handleRestock}
-                className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+                disabled={!selectedInventoryItem || inventoryItems.length === 0}
+                className={`px-4 py-2 rounded text-white
+                  ${!selectedInventoryItem || inventoryItems.length === 0
+                    ? 'bg-gray-300 cursor-not-allowed'
+                    : 'bg-green-600 hover:bg-green-700'}`}
               >
-                Actualizar Stock
+                Confirmar reposición
               </button>
             </div>
           </div>
@@ -1170,7 +1869,7 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
       {/* MODAL DE CONFIGURACIÓN */}
       {configModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
-          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-lg relative">
+          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-lg relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={closeConfigModal}
               className="absolute top-3 right-3 text-gray-500 hover:text-black"
@@ -1178,81 +1877,253 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
               <X />
             </button>
             <h2 className="text-xl font-semibold mb-4">Configurar Insumo</h2>
-            {/* Aquí pon los campos para seleccionar máquina, tipo de insumo, stock inicial, mínimo, crítico, etc. */}
+            
             <div className="flex flex-col gap-4">
-              <label className="block text-gray-700 font-bold">Máquina</label>
-              <input
-                type="text"
-                value={selectedMachine?.name || ""}
-                disabled
-                className="border rounded px-3 py-2 w-full bg-gray-100 text-gray-500"
-              />
-              <label className="block text-gray-700 font-bold">Tipo de Insumo</label>
-              <select
-                value={selectedSupplyType}
-                onChange={e => setSelectedSupplyType(e.target.value)}
-                className="border rounded px-3 py-2 w-full"
-              >
-                <option value="">Selecciona...</option>
-                {availableSupplyTypes.map(st => (
-                  <option key={st.id} value={st.id}>{st.name}</option>
-                ))}
-              </select>
-              <label className="block text-gray-700 font-bold">Stock inicial *</label>
-              <input
-                type="number"
-                value={initialStock}
-                onChange={e => setInitialStock(e.target.value)}
-                className="border rounded px-3 py-2 w-full"
-                min="0"
-              />
-              {selectedSupplyType && (
-                <span className="text-xs text-blue-600 mt-1 block">
-                  Ingresa el stock en {
-                    supplyTypes.find(st => st.id.toString() === selectedSupplyType)?.unit || "la unidad correspondiente"
-                  }
-                </span>
-              )}
-              <label className="block text-gray-700 font-bold">Nivel mínimo *</label>
-              <input
-                type="number"
-                value={minimumLevel}
-                onChange={e => setMinimumLevel(e.target.value)}
-                className="border rounded px-3 py-2 w-full"
-                min="0"
-              />
-              <label className="block text-gray-700 font-bold">Nivel crítico *</label>
-              <input
-                type="number"
-                value={criticalLevel}
-                onChange={e => setCriticalLevel(e.target.value)}
-                className="border rounded px-3 py-2 w-full"
-                min="0"
-              />
-              <label className="block text-gray-700 font-bold">Ratio de consumo (metros por metro impreso) *</label>
-              <input
-                type="number"
-                value={consumptionRatio}
-                onChange={e => setConsumptionRatio(e.target.value)}
-                className="border rounded px-3 py-2 w-full"
-                min="0"
-                step="0.01"
-              />
-              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">Máquina</label>
                 <input
-                  type="checkbox"
-                  checked={autoTrackConsumption}
-                  onChange={e => setAutoTrackConsumption(e.target.checked)}
-                  className="h-4 w-4"
+                  type="text"
+                  value={selectedMachine?.name || ""}
+                  disabled
+                  className="border rounded px-3 py-2 w-full bg-gray-100 text-gray-500"
                 />
-                Activar descuento automático al registrar cortes
-              </label>
-              <button
-                onClick={handleAddSupplyToMachine}
-                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-              >
-                Agregar Insumo
-              </button>
+              </div>
+
+              {/* Si es Plotter, mostrar selector de modo */}
+              {selectedMachine?.id?.toString() === "4" && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfigMode("existing")}
+                    className={`flex-1 px-3 py-2 rounded text-sm font-medium border
+                      ${configMode === "existing"
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-600 border-gray-300'}`}
+                  >
+                    Material existente
+                  </button>
+                  <button
+                    onClick={() => setConfigMode("new")}
+                    className={`flex-1 px-3 py-2 rounded text-sm font-medium border
+                      ${configMode === "new"
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-600 border-gray-300'}`}
+                  >
+                    Material nuevo
+                  </button>
+                </div>
+              )}
+
+              {/* Modo material nuevo (solo Plotter) */}
+              {selectedMachine?.id?.toString() === "4" && configMode === "new" ? (
+                <>
+                  <div>
+                    <label className="block text-gray-700 font-bold mb-1">
+                      Tipo de material *
+                    </label>
+                    <select
+                      value={newMaterialName}
+                      onChange={e => setNewMaterialName(e.target.value)}
+                      className="border rounded px-3 py-2 w-full"
+                    >
+                      <option value="">Selecciona...</option>
+                      <option value="Vinil">Vinil</option>
+                      <option value="Lona">Lona</option>
+                      <option value="Canvas">Canvas</option>
+                      <option value="Papel Blueback">Papel Blueback</option>
+                      <option value="Otro">Otro</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-bold mb-1">
+                      Ancho en metros *
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="Ej: 1.52"
+                      value={newMaterialWidth}
+                      onChange={e => setNewMaterialWidth(e.target.value)}
+                      className="border rounded px-3 py-2 w-full"
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-bold mb-1">
+                      Stock inicial (metros) *
+                    </label>
+                    <input
+                      type="number"
+                      value={initialStock}
+                      onChange={e => setInitialStock(e.target.value)}
+                      className="border rounded px-3 py-2 w-full"
+                      min="0"
+                    />
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!newMaterialName || !newMaterialWidth || !initialStock) {
+                        alert("Completa todos los campos.");
+                        return;
+                      }
+                      const supplyName = `${newMaterialName} ${parseFloat(newMaterialWidth).toFixed(2)}m`;
+                      
+                      // Verificar si ya existe
+                      const exists = supplyTypes.find(
+                        st => st.name === supplyName && st.machine_compatibility === 'Plotter'
+                      );
+                      if (exists) {
+                        alert(`${supplyName} ya existe. Selecciónalo en "Material existente".`);
+                        return;
+                      }
+
+                      // Crear supply_type nuevo
+                      const { data: newType, error: typeError } = await supabase
+                        .from('supply_types')
+                        .insert([{
+                          name: supplyName,
+                          category: 'Material',
+                          unit: 'metros',
+                          machine_compatibility: 'Plotter'
+                        }])
+                        .select()
+                        .single();
+
+                      if (typeError) {
+                        alert("Error al crear material: " + typeError.message);
+                        return;
+                      }
+
+                      // Agregar a machine_supplies
+                      const nowIso = new Date().toISOString();
+                      const { error: supplyError } = await supabase
+                        .from('machine_supplies')
+                        .insert([{
+                          machine_id: 4,
+                          supply_type_id: newType.id,
+                          current_stock: parseFloat(initialStock),
+                          minimum_level: 20,
+                          critical_level: 10,
+                          consumption_ratio: 1.0,
+                          auto_track: false,
+                          meters_accounted: 0,
+                          updated_by: currentUser?.name || 'Admin',
+                          last_updated: nowIso
+                        }]);
+
+                      if (supplyError) {
+                        alert("Error al agregar insumo: " + supplyError.message);
+                        return;
+                      }
+
+                      // Registrar en plotter_materials
+                      await supabase
+                        .from('plotter_materials')
+                        .insert([{
+                          name: newMaterialName,
+                          width_m: parseFloat(newMaterialWidth)
+                        }]);
+
+                      alert(`${supplyName} agregado correctamente.`);
+                      await fetchMachineSupplies();
+                      closeConfigModal();
+                    }}
+                    className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                  >
+                    Crear y agregar material
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-gray-700 font-bold mb-1">
+                      Tipo de Insumo
+                    </label>
+                    <select
+                      value={selectedSupplyType}
+                      onChange={e => setSelectedSupplyType(e.target.value)}
+                      className="border rounded px-3 py-2 w-full"
+                    >
+                      <option value="">Selecciona...</option>
+                      {availableSupplyTypes.map(st => (
+                        <option key={st.id} value={st.id}>{st.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-bold mb-1">
+                      Stock inicial *
+                    </label>
+                    <input
+                      type="number"
+                      value={initialStock}
+                      onChange={e => setInitialStock(e.target.value)}
+                      className="border rounded px-3 py-2 w-full"
+                      min="0"
+                    />
+                    {selectedSupplyType && (
+                      <span className="text-xs text-blue-600 mt-1 block">
+                        Ingresa el stock en {
+                          supplyTypes.find(st => 
+                            st.id.toString() === selectedSupplyType
+                          )?.unit || "la unidad correspondiente"
+                        }
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-bold mb-1">
+                      Nivel mínimo *
+                    </label>
+                    <input
+                      type="number"
+                      value={minimumLevel}
+                      onChange={e => setMinimumLevel(e.target.value)}
+                      className="border rounded px-3 py-2 w-full"
+                      min="0"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-bold mb-1">
+                      Nivel crítico *
+                    </label>
+                    <input
+                      type="number"
+                      value={criticalLevel}
+                      onChange={e => setCriticalLevel(e.target.value)}
+                      className="border rounded px-3 py-2 w-full"
+                      min="0"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-bold mb-1">
+                      Ratio de consumo *
+                    </label>
+                    <input
+                      type="number"
+                      value={consumptionRatio}
+                      onChange={e => setConsumptionRatio(e.target.value)}
+                      className="border rounded px-3 py-2 w-full"
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={autoTrackConsumption}
+                      onChange={e => setAutoTrackConsumption(e.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    Activar descuento automático al registrar cortes
+                  </label>
+                  <button
+                    onClick={handleAddSupplyToMachine}
+                    className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                  >
+                    Agregar Insumo
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1271,87 +2142,128 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
             <h2 className="text-xl font-semibold mb-4">
               Editar Insumo {editingSupply?.supply_types?.name ? `- ${editingSupply.supply_types.name}` : ""}
             </h2>
-            <div className="flex flex-col gap-4">
-              <label className="block text-gray-700 font-bold">Stock mínimo</label>
-              <input
-                type="number"
-                value={editingSupply.minimum_level}
-                onChange={e => setEditingSupply({ ...editingSupply, minimum_level: e.target.value })}
-                className="border rounded px-3 py-2 w-full"
-              />
-              <label className="block text-gray-700 font-bold">Stock crítico</label>
-              <input
-                type="number"
-                value={editingSupply.critical_level}
-                onChange={e => setEditingSupply({ ...editingSupply, critical_level: e.target.value })}
-                className="border rounded px-3 py-2 w-full"
-              />
-              <label className="block text-gray-700 font-bold">Ratio de consumo *</label>
-              <input
-                type="number"
-                value={editingSupply.consumption_ratio}
-                onChange={e => setEditingSupply({ ...editingSupply, consumption_ratio: e.target.value })}
-                className="border rounded px-3 py-2 w-full"
-                min="0"
-                step="0.01"
-              />
-              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-gray-600 text-sm font-semibold mb-1">
+                  Stock actual *
+                </label>
                 <input
-                  type="checkbox"
-                  checked={Boolean(editingSupply.auto_track)}
-                  onChange={e => setEditingSupply({ ...editingSupply, auto_track: e.target.checked })}
-                  className="h-4 w-4"
+                  type="number"
+                  value={editingSupply.current_stock}
+                  onChange={e => setEditingSupply({ ...editingSupply, current_stock: e.target.value })}
+                  className="border rounded px-3 py-1.5 w-full text-sm"
+                  min="0" step="0.01"
                 />
-                Activar descuento automático al registrar cortes
-              </label>
-              <label className="block text-gray-700 font-bold mb-2">Razón de edición *</label>
-              <input
-                type="text"
-                value={editReason}
-                onChange={e => setEditReason(e.target.value)}
-                className="border rounded px-3 py-2 w-full"
-              />
-              <label className="block text-gray-700 font-bold mb-2">Quién autoriza *</label>
-              <input
-                type="text"
-                value={editAuthorizedBy}
-                onChange={e => setEditAuthorizedBy(e.target.value)}
-                className="border rounded px-3 py-2 w-full"
-              />
-              <button
-                onClick={async () => {
-                  if (!editReason.trim() || !editAuthorizedBy.trim()) {
-                    alert("Completa la razón y quién autoriza.");
-                    return;
-                  }
-                  const ratioValue = parseFloat(editingSupply.consumption_ratio);
-                  if (!ratioValue || ratioValue <= 0) {
-                    alert("Define un ratio de consumo válido.");
-                    return;
-                  }
-                  const { error } = await supabase
-                    .from('machine_supplies')
-                    .update({
-                      minimum_level: parseFloat(editingSupply.minimum_level),
-                      critical_level: parseFloat(editingSupply.critical_level),
-                      consumption_ratio: ratioValue,
-                      auto_track: Boolean(editingSupply.auto_track),
-                      edit_reason: editReason,
-                      edit_authorized_by: editAuthorizedBy
-                    })
-                    .eq('id', editingSupply.id);
-                  if (error) {
-                    alert("Error al editar insumo: " + error.message);
-                  } else {
-                    alert("Insumo editado correctamente.");
-                    closeEditModal();
-                    fetchMachineSupplies();
-                  }
-                }}
-                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-              >
-                Guardar Cambios
-              </button>
+              </div>
+              <div>
+                <label className="block text-gray-600 text-sm font-semibold mb-1">
+                  Consumo por metro ({editingSupply?.supply_types?.unit || 'u'}/m) *
+                </label>
+                <input
+                  type="number"
+                  value={editingSupply.consumption_ratio}
+                  onChange={e => setEditingSupply({ ...editingSupply, consumption_ratio: e.target.value })}
+                  className="border rounded px-3 py-1.5 w-full text-sm"
+                  min="0" step="0.01"
+                />
+              </div>
+              <div>
+                <label className="block text-gray-600 text-sm font-semibold mb-1">
+                  Stock mínimo
+                </label>
+                <input
+                  type="number"
+                  value={editingSupply.minimum_level}
+                  onChange={e => setEditingSupply({ ...editingSupply, minimum_level: e.target.value })}
+                  className="border rounded px-3 py-1.5 w-full text-sm"
+                  min="0"
+                />
+              </div>
+              <div>
+                <label className="block text-gray-600 text-sm font-semibold mb-1">
+                  Stock crítico
+                </label>
+                <input
+                  type="number"
+                  value={editingSupply.critical_level}
+                  onChange={e => setEditingSupply({ ...editingSupply, critical_level: e.target.value })}
+                  className="border rounded px-3 py-1.5 w-full text-sm"
+                  min="0"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editingSupply.auto_track)}
+                    onChange={e => setEditingSupply({ ...editingSupply, auto_track: e.target.checked })}
+                    className="h-4 w-4"
+                  />
+                  Descuento automático al registrar metros
+                </label>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-gray-600 text-sm font-semibold mb-1">
+                  Razón de edición *
+                </label>
+                <input
+                  type="text"
+                  value={editReason}
+                  onChange={e => setEditReason(e.target.value)}
+                  className="border rounded px-3 py-1.5 w-full text-sm"
+                  placeholder="¿Por qué se edita este insumo?"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-gray-600 text-sm font-semibold mb-1">
+                  Quién autoriza *
+                </label>
+                <input
+                  type="text"
+                  value={editAuthorizedBy}
+                  onChange={e => setEditAuthorizedBy(e.target.value)}
+                  className="border rounded px-3 py-1.5 w-full text-sm"
+                  placeholder="Nombre de quien autoriza"
+                />
+              </div>
+              <div className="col-span-2">
+                <button
+                  onClick={async () => {
+                    if (!editReason.trim() || !editAuthorizedBy.trim()) {
+                      alert("Completa la razón y quién autoriza.");
+                      return;
+                    }
+                    const ratioValue = parseFloat(editingSupply.consumption_ratio);
+                    if (!ratioValue || ratioValue <= 0) {
+                      alert("Define un consumo por metro válido.");
+                      return;
+                    }
+                    const { error } = await supabase
+                      .from('machine_supplies')
+                      .update({
+                        current_stock: parseFloat(editingSupply.current_stock),
+                        minimum_level: parseFloat(editingSupply.minimum_level),
+                        critical_level: parseFloat(editingSupply.critical_level),
+                        consumption_ratio: ratioValue,
+                        auto_track: Boolean(editingSupply.auto_track),
+                        edit_reason: editReason,
+                        edit_authorized_by: editAuthorizedBy
+                      })
+                      .eq('id', editingSupply.id);
+                    if (error) {
+                      alert("Error al editar: " + error.message);
+                    } else {
+                      alert("Insumo actualizado.");
+                      closeEditModal();
+                      fetchMachineSupplies();
+                    }
+                  }}
+                  className="w-full bg-blue-600 text-white px-4 py-2 rounded 
+                    hover:bg-blue-700 text-sm font-medium"
+                >
+                  Guardar Cambios
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -60,6 +60,12 @@ export default function Maquinas() {
   const [machineSupplies, setMachineSupplies] = useState({});
   const [plotterMaterials, setPlotterMaterials] = useState([]);
   const [selectedMaterial, setSelectedMaterial] = useState(null);
+  const [registroFolio, setRegistroFolio] = useState("");
+  const [registroDescripcion, setRegistroDescripcion] = useState("");
+  const [registroLoading, setRegistroLoading] = useState(false);
+  const [stockWarning, setStockWarning] = useState("");
+  const [plotterActiveRoll, setPlotterActiveRoll] = useState(null);
+  const [machineActiveRolls, setMachineActiveRolls] = useState({});
 
   const navigate = useNavigate();
   const currentUser = useCurrentUser();
@@ -160,16 +166,110 @@ export default function Maquinas() {
 
   const fetchPlotterMaterials = async () => {
     const { data, error } = await supabase
-      .from('machine_supplies')
-      .select('id, current_stock, meters_accounted, supply_type_id, supply_types(name, unit)')
-      .eq('machine_id', 4);
+      .from('inventory')
+      .select(`
+        id,
+        unit_id,
+        quantity_remaining,
+        plotter_catalog_id,
+        status
+      `)
+      .eq('pool', 'Plotter')
+      .in('status', ['in_stock', 'in_machine'])
+      .order('unit_id');
+
     if (error || !data) return;
-    setPlotterMaterials(data);
+
+    // Traer catálogo de materiales
+    const { data: catalog } = await supabase
+      .from('plotter_materials_catalog')
+      .select(`
+        id,
+        plotter_material_types(name),
+        plotter_material_widths(label, width_m)
+      `);
+
+    const catalogMap = {};
+    (catalog || []).forEach(c => {
+      catalogMap[c.id] = {
+        name: `${c.plotter_material_types.name} ${c.plotter_material_widths.label}`,
+        unit: 'metros',
+        width_m: c.plotter_material_widths.width_m
+      };
+    });
+
+    const enriched = data.map(item => ({
+      ...item,
+      supply_types: catalogMap[item.plotter_catalog_id] || { name: 'Material', unit: 'metros' }
+    }));
+
+    setPlotterMaterials(enriched);
+  };
+
+  const fetchPlotterActiveRoll = async () => {
+    const { data } = await supabase
+      .from('machine_daily_prints')
+      .select('inventory_item_id, date')
+      .eq('machine_id', 4)
+      .not('inventory_item_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!data?.inventory_item_id) return;
+
+    const { data: item } = await supabase
+      .from('inventory')
+      .select('id, unit_id, display_name, plotter_catalog_id')
+      .eq('id', data.inventory_item_id)
+      .maybeSingle();
+
+    if (!item) return;
+
+    const { data: cat } = await supabase
+      .from('plotter_materials_catalog')
+      .select('width_id')
+      .eq('id', item.plotter_catalog_id)
+      .maybeSingle();
+
+    const { data: width } = cat ? await supabase
+      .from('plotter_material_widths')
+      .select('label')
+      .eq('id', cat.width_id)
+      .maybeSingle() : { data: null };
+
+    setPlotterActiveRoll({
+      name: `${item.display_name || ''} ${width?.label || ''}`.trim(),
+      unit_id: item.unit_id
+    });
+  };
+
+  const fetchMachineActiveRolls = async () => {
+    const { data: activeRolls } = await supabase
+      .from('inventory')
+      .select('machine_id, unit_id, quantity_remaining, supply_type_id, supply_types(name)')
+      .eq('status', 'in_machine')
+      .in('supply_type_id', [7, 15]);
+
+    if (!activeRolls) return;
+
+    const rollsMap = {};
+    activeRolls.forEach(roll => {
+      rollsMap[roll.machine_id] = {
+        unit_id: roll.unit_id,
+        quantity_remaining: roll.quantity_remaining,
+        supply_name: roll.supply_types?.name || 'Film'
+      };
+    });
+
+    setMachineActiveRolls(rollsMap);
   };
 
   useEffect(() => {
     fetchLatestRecords();
     fetchTodayTotals();
+    fetchPlotterActiveRoll();
+    fetchMachineActiveRolls();
   }, [impresoras]);
 
   // fetch queue per machine
@@ -460,59 +560,167 @@ export default function Maquinas() {
 
   // Función para guardar en Supabase
   const registrarMetros = async () => {
-    if (!metrosHoy || isNaN(Number(metrosHoy))) {
+    if (!metrosHoy || isNaN(Number(metrosHoy)) || Number(metrosHoy) <= 0) {
       alert("Ingresa una cantidad válida de metros.");
       return;
     }
-
+    if (!registroFolio.trim()) {
+      alert("Ingresa el folio del trabajo.");
+      return;
+    }
     if (impresoraSeleccionada?.id === 4 && !selectedMaterial) {
       alert("Selecciona el material que estás usando.");
       return;
     }
 
-    const payload = {
-      machine_id: impresoraSeleccionada.id,
-      date: registroFecha,
-      meters_printed: Number(metrosHoy),
-      registered_by: (currentUser && (currentUser.name || currentUser.username || currentUser.email)) || 'Sistema'
-    };
+    const metros = Number(metrosHoy);
 
-    const { data: inserted, error } = await supabase
-      .from('machine_daily_prints')
-      .insert([payload])
-      .select();
-    if (error) {
-      alert("Error al registrar: " + error.message);
-      return;
-    }
+    // Verificar stock del rollo activo antes de guardar
+    if (impresoraSeleccionada?.id !== 4) {
+      const { data: activeRoll } = await supabase
+        .from('inventory')
+        .select('unit_id, quantity_remaining')
+        .eq('machine_id', impresoraSeleccionada.id)
+        .eq('status', 'in_machine')
+        .in('supply_type_id', [7, 15])
+        .maybeSingle();
 
-    const record = Array.isArray(inserted) ? inserted[0] : null;
+      if (!activeRoll) {
+        setStockWarning(
+          `No hay rollo activo en esta máquina. ` +
+          `Registra un rollo nuevo en "Reponer Stock" antes de continuar.`
+        );
+        return;
+      }
 
-    if (record && impresoraSeleccionada?.id !== 4) {
-      try {
-        await autoConsumeAfterProduction({
-          machineId: record.machine_id,
-          meters: record.meters_printed,
-          operator: record.registered_by,
-          productionRecordId: (typeof record?.id === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(record.id)) ? record.id : null,
-          productionDate: record.date,
-        });
-      } catch (consumeError) {
-        console.error('Error descontando insumos', consumeError);
-        alert('Registro guardado, pero no se pudo descontar el insumo automáticamente: ' + (consumeError.message || consumeError));
+      if (Number(activeRoll.quantity_remaining) < metros) {
+        setStockWarning(
+          `El rollo activo (${activeRoll.unit_id}) solo tiene ` +
+          `${Number(activeRoll.quantity_remaining).toFixed(2)}m disponibles. ` +
+          `Si cambiaste de rollo, repón el stock primero.`
+        );
+        return;
       }
     }
 
-    if (impresoraSeleccionada?.id === 4 && selectedMaterial && record) {
-      const deltaMeters = Number(metrosHoy);
-      if (deltaMeters > 0) {
-        const newStock = Number(selectedMaterial.current_stock) - deltaMeters;
+    if (impresoraSeleccionada?.id !== 4) {
+      const { data: supplies } = await supabase
+        .from('machine_supplies')
+        .select('current_stock, consumption_ratio, supply_types(name)')
+        .eq('machine_id', impresoraSeleccionada.id)
+        .eq('auto_track', true);
+
+      if (supplies) {
+        const insufficient = supplies.filter(s => 
+          Number(s.current_stock) < (metros * Number(s.consumption_ratio))
+        );
+
+        if (insufficient.length > 0) {
+          const lista = insufficient.map(s => 
+            `${s.supply_types.name}: tiene ${Number(s.current_stock).toFixed(2)} ` +
+            `y necesita ${(metros * Number(s.consumption_ratio)).toFixed(2)}`
+          ).join('\n');
+          
+          setStockWarning(
+            `Stock insuficiente para imprimir ${metros}m:\n${lista}\n\n` +
+            `Repón los insumos antes de continuar.`
+          );
+          setRegistroLoading(false);
+          return;
+        }
+      }
+    }
+
+    setRegistroLoading(true);
+
+    const operator = (currentUser && 
+      (currentUser.name || currentUser.username || currentUser.email)
+    ) || 'Sistema';
+
+    try {
+      const { data: inserted, error } = await supabase
+        .from('machine_daily_prints')
+        .insert([{
+          machine_id: impresoraSeleccionada.id,
+          date: registroFecha,
+          meters_printed: metros,
+          registered_by: operator,
+          folio: registroFolio.trim(),
+          job_description: registroDescripcion.trim() || null,
+          inventory_item_id: impresoraSeleccionada.id === 4 && selectedMaterial 
+            ? selectedMaterial.id 
+            : null
+        }])
+        .select()
+        .single();
+
+      if (error) {
+        alert("Error al registrar: " + error.message);
+        return;
+      }
+
+      // AutoConsume para DTF y UV
+      if (impresoraSeleccionada?.id !== 4) {
+        try {
+          await autoConsumeAfterProduction({
+            machineId: inserted.machine_id,
+            meters: metros,
+            operator,
+            productionRecordId: inserted.id,
+            productionDate: inserted.date,
+            folio: registroFolio.trim()
+          });
+        } catch (consumeError) {
+          console.error('Error descontando insumos', consumeError);
+        }
+      }
+
+      if (impresoraSeleccionada?.id === 4 && selectedMaterial) {
+        if (!selectedMaterial.quantity_remaining || 
+            Number(selectedMaterial.quantity_remaining) <= 0) {
+          setStockWarning(
+            `No hay stock disponible de ${selectedMaterial.supply_types.name}. ` +
+            `Registra un rollo nuevo en Inventario primero.`
+          );
+          setRegistroLoading(false);
+          return;
+        }
+        if (Number(selectedMaterial.quantity_remaining) < metros) {
+          setStockWarning(
+            `${selectedMaterial.supply_types.name} solo tiene ` +
+            `${Number(selectedMaterial.quantity_remaining).toFixed(2)}m disponibles.`
+          );
+          setRegistroLoading(false);
+          return;
+        }
+      }
+
+      if (impresoraSeleccionada?.id === 4 && selectedMaterial && metros > 0) {
+        const newRemaining = Number(selectedMaterial.quantity_remaining) - metros;
+        const isDepleted = newRemaining <= 0;
+
+        // Si hay otro rollo in_machine diferente al seleccionado, regresarlo a in_stock
+        const { data: currentInMachine } = await supabase
+          .from('inventory')
+          .select('id')
+          .eq('pool', 'Plotter')
+          .eq('status', 'in_machine')
+          .neq('id', selectedMaterial.id)
+          .limit(10);
+
+        if (currentInMachine && currentInMachine.length > 0) {
+          await supabase
+            .from('inventory')
+            .update({ status: 'in_stock' })
+            .in('id', currentInMachine.map(r => r.id));
+        }
+
         await supabase
-          .from('machine_supplies')
-          .update({ 
-            current_stock: Number(newStock.toFixed(3)),
-            meters_accounted: Number((selectedMaterial.meters_accounted || 0) + deltaMeters).toFixed(3),
-            last_updated: new Date().toISOString()
+          .from('inventory')
+          .update({
+            quantity_remaining: Math.max(0, Number(newRemaining.toFixed(3))),
+            status: isDepleted ? 'depleted' : 'in_machine',
+            depleted_at: isDepleted ? new Date().toISOString() : null
           })
           .eq('id', selectedMaterial.id);
 
@@ -520,31 +728,46 @@ export default function Maquinas() {
           .from('supply_movements')
           .insert([{
             machine_id: 4,
-            supply_type_id: selectedMaterial.supply_type_id,
+            supply_type_id: null,
             movement_type: 'consumption',
-            quantity_before: Number(selectedMaterial.current_stock),
-            quantity_after: Number(newStock.toFixed(3)),
-            quantity_changed: Number((-deltaMeters).toFixed(3)),
-            recorded_by: record?.registered_by || 'Sistema',
-            notes: `Consumo por corte ${registroFecha}`,
+            quantity_before: Number(selectedMaterial.quantity_remaining),
+            quantity_after: Math.max(0, Number(newRemaining.toFixed(3))),
+            quantity_changed: Number((-metros).toFixed(3)),
+            recorded_by: operator,
+            notes: `Folio ${registroFolio} — ${registroFecha}`,
             recorded_at: new Date().toISOString()
           }]);
-          
+
         setSelectedMaterial(null);
       }
-    }
 
-    // actualizar UI localmente
-    await fetchLatestRecords();
-    await fetchTodayTotals();
-    await fetchLoyaltyMeters();
-    await fetchMachineProduction();
-    await fetchMachineSupplies();
-    await fetchPlotterMaterials();
-    alert("Registro guardado");
-    setRegistroModalOpen(false);
-    setMetrosHoy("");
-    setImpresoraSeleccionada(null);
+      setLatestRecords(prev => ({
+        ...prev,
+        [impresoraSeleccionada.id]: {
+          machine_id: impresoraSeleccionada.id,
+          date: registroFecha,
+          meters_printed: metros
+        }
+      }));
+
+      await fetchTodayTotals();
+      await fetchMachineProduction();
+      await fetchMachineSupplies();
+      await fetchMachineActiveRolls();
+      if (impresoraSeleccionada?.id === 4) await fetchPlotterMaterials();
+
+      setRegistroModalOpen(false);
+      setMetrosHoy("");
+      setRegistroFolio("");
+      setRegistroDescripcion("");
+      setStockWarning("");
+      setImpresoraSeleccionada(null);
+
+    } catch (err) {
+      alert("Error inesperado: " + err.message);
+    } finally {
+      setRegistroLoading(false);
+    }
   };
 
   // Nuevo: Guardar corte diario para todas las máquinas
@@ -903,6 +1126,38 @@ export default function Maquinas() {
                 );
               })()}
 
+              {impresora.id !== 4 && machineActiveRolls[impresora.id] && (
+                <div className="mt-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500">Rollo activo:</span>
+                    <span className="font-semibold text-blue-700 font-mono">
+                      {machineActiveRolls[impresora.id].unit_id}
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      ({Number(machineActiveRolls[impresora.id].quantity_remaining).toFixed(2)}m)
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {impresora.id === 4 && (
+                <div className="mt-2 text-sm">
+                  {plotterActiveRoll ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500">Último material:</span>
+                      <span className="font-semibold text-blue-700">
+                        {plotterActiveRoll.name}
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        ({plotterActiveRoll.unit_id})
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-gray-400 text-xs">Sin material registrado</span>
+                  )}
+                </div>
+              )}
+
               <div className="mt-4 flex gap-2">
                 <button
                   onClick={e => { e.stopPropagation(); openQueueModal(impresora); }}
@@ -918,6 +1173,9 @@ export default function Maquinas() {
                     setMetrosHoy("");
                     setRegistroFecha(getLocalDateString());
                     setSelectedMaterial(null);
+                    setRegistroFolio("");
+                    setRegistroDescripcion("");
+                    setStockWarning("");
                   }}
                   className="flex-1 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
                 >
@@ -1094,59 +1352,116 @@ export default function Maquinas() {
         <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
           <div className="bg-white p-6 rounded-xl w-full max-w-xs shadow-lg relative">
             <button
-              onClick={() => setRegistroModalOpen(false)}
+              onClick={() => {
+                setRegistroModalOpen(false);
+                setStockWarning("");
+              }}
               className="absolute top-3 right-3 text-gray-500 hover:text-black"
             >
               <X />
             </button>
             <h2 className="text-lg font-semibold mb-4">
-              Registrar metros para {impresoraSeleccionada?.nombre}
+              Registrar trabajo — {impresoraSeleccionada?.nombre}
             </h2>
-            <div className="mb-3">
-              <label className="block text-gray-700 font-bold mb-1">Fecha</label>
-              <input
-                type="date"
-                value={registroFecha}
-                onChange={e => setRegistroFecha(e.target.value)}
-                className="border rounded px-3 py-2 w-full"
-              />
-            </div>
-            <input
-              type="number"
-              placeholder="Metros impresos"
-              value={metrosHoy}
-              onChange={e => setMetrosHoy(e.target.value)}
-              className="border rounded px-3 py-2 w-full mb-4"
-              min="0"
-            />
-            {impresoraSeleccionada?.id === 4 && (
-              <div className="mb-4">
-                <label className="block text-gray-700 font-bold mb-2">
-                  Material *
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">
+                  Folio *
                 </label>
-                <select
-                  value={selectedMaterial?.id || ""}
+                <input
+                  type="text"
+                  placeholder="Ej: 7259"
+                  value={registroFolio}
                   onChange={e => {
-                    const mat = plotterMaterials.find(m => m.id === Number(e.target.value));
-                    setSelectedMaterial(mat || null);
+                    setRegistroFolio(e.target.value);
+                    setStockWarning("");
                   }}
                   className="border rounded px-3 py-2 w-full"
-                >
-                  <option value="">Selecciona material...</option>
-                  {plotterMaterials.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {m.supply_types.name} — Stock: {m.current_stock}m
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
-            )}
-            <button
-              onClick={registrarMetros}
-              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full"
-            >
-              Guardar registro
-            </button>
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">
+                  Metros *
+                </label>
+                <input
+                  type="number"
+                  placeholder="Metros a imprimir"
+                  value={metrosHoy}
+                  onChange={e => {
+                    setMetrosHoy(e.target.value);
+                    setStockWarning("");
+                  }}
+                  className="border rounded px-3 py-2 w-full"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">
+                  Descripción
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: REYES_NUÑEZ-PARTE1"
+                  value={registroDescripcion}
+                  onChange={e => setRegistroDescripcion(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">
+                  Fecha
+                </label>
+                <input
+                  type="date"
+                  value={registroFecha}
+                  onChange={e => setRegistroFecha(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                />
+              </div>
+
+              {impresoraSeleccionada?.id === 4 && (
+                <div>
+                  <label className="block text-gray-700 font-bold mb-2">
+                    Material *
+                  </label>
+                  <select
+                    value={selectedMaterial?.id || ""}
+                    onChange={e => {
+                      const mat = plotterMaterials.find(
+                        m => m.id === Number(e.target.value)
+                      );
+                      setSelectedMaterial(mat || null);
+                      setStockWarning("");
+                    }}
+                    className="border rounded px-3 py-2 w-full"
+                  >
+                    <option value="">Selecciona material...</option>
+                    {plotterMaterials.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.supply_types.name} — Stock: {m.quantity_remaining}m
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {stockWarning && (
+                <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 text-sm px-3 py-2 rounded">
+                  ⚠ {stockWarning}
+                </div>
+              )}
+
+              <button
+                onClick={registrarMetros}
+                disabled={registroLoading}
+                className={`bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full ${
+                  registroLoading ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {registroLoading ? "Guardando..." : "Registrar trabajo"}
+              </button>
+            </div>
           </div>
         </div>
       )}

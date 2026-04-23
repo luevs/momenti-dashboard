@@ -21,10 +21,9 @@ export default function Layout({ children }) {
       children: [
         { path: '/operacion', label: 'Operación', icon: BarChart2 },
         { path: '/trabajo-ocr', label: 'Carga de Tirajes', icon: FileImage },
-        { path: '/insumos', label: 'Insumos', icon: Package2 },
+        { path: '/inventario', label: 'Inventario', icon: Package2 },
       ]
     },
-    { path: '/reportes', label: 'Reportes', icon: BarChart2 },
     {
       path: '/clientes', label: 'Clientes', icon: ClipboardList,
       children: [
@@ -162,6 +161,7 @@ export default function Layout({ children }) {
                   if (path === '/operacion') return 'Operación de Máquinas';
                   if (path === '/trabajo-ocr') return 'Carga de Tirajes OCR';
                   if (path === '/insumos') return 'Gestión de Insumos';
+                  if (path === '/inventario') return 'Inventario de Insumos';
                   if (path === '/retizaciones') return 'Cotizaciones';
                   if (path.startsWith('/cotizaciones/')) {
                     if (path.includes('/nueva')) return 'Nueva Cotización';

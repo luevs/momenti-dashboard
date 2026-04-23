@@ -1,11 +1,7 @@
 import { supabase } from '../supabaseClient';
 
 const buildRecordedAtIso = (productionDate) => {
-  if (!productionDate) return new Date().toISOString();
-  const base = new Date(productionDate);
-  if (Number.isNaN(base.getTime())) return new Date().toISOString();
-  base.setHours(12, 0, 0, 0);
-  return base.toISOString();
+  return new Date().toISOString();
 };
 
 const fetchTrackableSupplies = async (machineId) => {
@@ -20,35 +16,55 @@ const fetchTrackableSupplies = async (machineId) => {
   return trackable.length > 0 ? trackable : supplies;
 };
 
-const updateActiveRoll = async (machineId, supplyTypeId, metersConsumed) => {
+const getMachinePool = (machineId) => {
+  const pools = {
+    1: 'DTF Textil',
+    2: 'DTF Textil', 
+    3: 'UV DTF',
+    4: 'Plotter'
+  };
+  return pools[machineId] || 'DTF Textil';
+};
+
+const updateActiveInventory = async (machineId, supplyTypeId, metersConsumed, pool) => {
   try {
-    const { data, error } = await supabase
-      .from('supply_rolls')
-      .select('id, current_stock, meters_yielded')
-      .eq('machine_id', machineId)
+    const isFilm = supplyTypeId === 7 || supplyTypeId === 15;
+
+    let query = supabase
+      .from('inventory')
+      .select('id, quantity_remaining, unit_id')
       .eq('supply_type_id', supplyTypeId)
-      .eq('status', 'active')
-      .order('received_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .eq('status', 'in_machine')
+      .order('received_at', { ascending: true })
+      .limit(1);
 
-    if (error || !data) return;
+    if (isFilm) {
+      query = query.eq('machine_id', machineId);
+    } else {
+      query = query.eq('pool', pool);
+    }
 
-    const newStock = Number((data.current_stock - metersConsumed).toFixed(3));
-    const newYielded = Number((data.meters_yielded + metersConsumed).toFixed(3));
-    const isDepleted = newStock <= 0;
+    const { data, error } = await query.maybeSingle();
+    if (error || !data) return null;
+
+    const consumed = Number(metersConsumed);
+    const newRemaining = Number((data.quantity_remaining - consumed).toFixed(3));
+    const isDepleted = newRemaining <= 0;
 
     await supabase
-      .from('supply_rolls')
+      .from('inventory')
       .update({
-        current_stock: Math.max(0, newStock),
-        meters_yielded: newYielded,
-        status: isDepleted ? 'depleted' : 'active',
+        quantity_remaining: Math.max(0, newRemaining),
+        status: isDepleted ? 'depleted' : 'in_machine',
         depleted_at: isDepleted ? new Date().toISOString() : null
       })
       .eq('id', data.id);
+
+    return data.id;
+
   } catch (e) {
-    console.error('Error updating active roll', e);
+    console.error('Error updating inventory', e);
+    return null;
   }
 };
 
@@ -60,6 +76,7 @@ const buildMovementPayload = ({
   productionRecordId,
   productionDate,
   metersAccountedAfter,
+  folio,
 }) => {
   const recordedAt = buildRecordedAtIso(productionDate);
   const before = Number(supply.current_stock) || 0;
@@ -76,8 +93,8 @@ const buildMovementPayload = ({
       quantity_changed: Number(quantityChange.toFixed(3)),
       recorded_by: operator || 'Sistema',
       notes: movementType === 'consumption'
-        ? `Consumo automático por ${productionDate}`
-        : `Ajuste automático por modificación del corte ${productionDate}`,
+        ? `Consumo automático${folio ? ' — Folio ' + folio : ''} — ${productionDate}`
+        : `Ajuste automático${folio ? ' — Folio ' + folio : ''} — ${productionDate}`,
       // Only attach production_record_id when it looks like a canonical UUID
       // (8-4-4-4-12 hex chars). If the caller passes a numeric id (e.g. 148)
       // or other non-UUID string, store null to avoid DB errors.
@@ -101,6 +118,7 @@ export const autoConsumeAfterProduction = async ({
   operator,
   productionRecordId,
   productionDate,
+  folio,
 }) => {
   const parsedMeters = Number(meters);
   if (!machineId || !Number.isFinite(parsedMeters) || parsedMeters === 0) return [];
@@ -130,9 +148,20 @@ export const autoConsumeAfterProduction = async ({
       productionRecordId,
       productionDate,
       metersAccountedAfter: accountedAfter,
+      folio,
     });
 
     try {
+      if (consuming) {
+        const pool = getMachinePool(machineId);
+        const inventoryItemId = await updateActiveInventory(
+          machineId, supply.supply_type_id, quantity, pool
+        );
+        if (inventoryItemId) {
+          movement.inventory_item_id = inventoryItemId;
+        }
+      }
+
       const { error: movementError } = await supabase.from('supply_movements').insert([movement]);
       if (movementError) {
         // record the error but continue processing other supplies
@@ -165,9 +194,6 @@ export const autoConsumeAfterProduction = async ({
             unit: supply?.supply_types?.unit || '',
             type: consuming ? 'consumption' : 'adjustment',
           });
-          if (consuming) {
-            await updateActiveRoll(machineId, supply.supply_type_id, quantity);
-          }
         }
       }
     } catch (e) {
