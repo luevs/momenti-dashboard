@@ -1438,7 +1438,10 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
                     </div>
                     
                     <p className={`text-2xl font-bold ${getStatusTextColor(status)} mb-1`}>
-                      {supply.current_stock} {supply.supply_types.unit}
+                      {supply.supply_types.name.includes('Film') && activeRolls[supply.supply_type_id]
+                        ? activeRolls[supply.supply_type_id].quantity_remaining
+                        : supply.current_stock
+                      } {supply.supply_types.unit}
                     </p>
                     
                     {(supply.supply_types.name.includes('Film')) && 
@@ -2143,18 +2146,20 @@ const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
               Editar Insumo {editingSupply?.supply_types?.name ? `- ${editingSupply.supply_types.name}` : ""}
             </h2>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-gray-600 text-sm font-semibold mb-1">
-                  Stock actual *
-                </label>
-                <input
-                  type="number"
-                  value={editingSupply.current_stock}
-                  onChange={e => setEditingSupply({ ...editingSupply, current_stock: e.target.value })}
-                  className="border rounded px-3 py-1.5 w-full text-sm"
-                  min="0" step="0.01"
-                />
-              </div>
+              {!editingSupply?.supply_types?.name?.includes('Film') && (
+                <div>
+                  <label className="block text-gray-600 text-sm font-semibold mb-1">
+                    Stock actual *
+                  </label>
+                  <input
+                    type="number"
+                    value={editingSupply.current_stock}
+                    onChange={e => setEditingSupply({ ...editingSupply, current_stock: e.target.value })}
+                    className="border rounded px-3 py-1.5 w-full text-sm"
+                    min="0" step="0.01"
+                  />
+                </div>
+              )}
               <div>
                 <label className="block text-gray-600 text-sm font-semibold mb-1">
                   Consumo por metro ({editingSupply?.supply_types?.unit || 'u'}/m) *

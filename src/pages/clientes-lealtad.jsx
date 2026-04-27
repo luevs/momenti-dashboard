@@ -181,6 +181,11 @@ export default function ClientesLealtad() {
   const [isSubmittingMeters, setIsSubmittingMeters] = useState(false);
   const isSubmittingMetersRef = React.useRef(false);
 
+  // Estados para el pokayoke de duplicados
+  const [duplicateWarningModalOpen, setDuplicateWarningModalOpen] = useState(false);
+  const [previousTodayRecord, setPreviousTodayRecord] = useState(null);
+  const [pendingSubmission, setPendingSubmission] = useState(null);
+
   // Función para abrir modal de registro de metros (invocada desde CustomerLoyaltyCard)
   // customerOrId can be either a customer object or an id
   const handleRegisterMeters = (customerOrId, type, programs) => {
@@ -232,8 +237,54 @@ export default function ClientesLealtad() {
     setRegisterMetersModalOpen(true);
   };
 
+  // Función para verificar si ya hay registros del mismo programa hoy
+  const checkTodayDuplicates = async (programId, customerId) => {
+    try {
+      const today = new Date();
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+      
+      // Buscar en orders
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('program_id', programId)
+        .gte('recorded_at', todayStart.toISOString())
+        .lte('recorded_at', todayEnd.toISOString())
+        .order('recorded_at', { ascending: false });
+
+      if (ordersError) {
+        console.warn('Error checking orders:', ordersError);
+      }
+
+      // Buscar en order_history
+      const { data: historyData, error: historyError } = await supabase
+        .from('order_history')
+        .select('*')
+        .eq('program_id', programId)
+        .gte('recorded_at', todayStart.toISOString())
+        .lte('recorded_at', todayEnd.toISOString())
+        .order('recorded_at', { ascending: false });
+
+      if (historyError) {
+        console.warn('Error checking order_history:', historyError);
+      }
+
+      // Combinar resultados
+      const allRecords = [...(ordersData || []), ...(historyData || [])];
+      
+      // Ordenar por fecha más reciente primero
+      allRecords.sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+      
+      return allRecords.length > 0 ? allRecords[0] : null;
+    } catch (error) {
+      console.error('Error checking duplicates:', error);
+      return null;
+    }
+  };
+
   // Manejar el envío del formulario de registro por programa
-  const handleSubmitMeters = async (e) => {
+  const handleSubmitMeters = async (e, bypassDuplicateCheck = false) => {
     e.preventDefault();
 
     if (isSubmittingMetersRef.current) {
@@ -281,6 +332,19 @@ export default function ClientesLealtad() {
     if (!autorizacionCliente) {
       alert('Por favor, confirma la autorización del cliente.');
       return;
+    }
+
+    // 🛡️ POKAYOKE: Verificar duplicados del mismo día (solo si no viene de confirmación)
+    if (!bypassDuplicateCheck) {
+      const todayRecord = await checkTodayDuplicates(selectedProgramId, selectedCustomerForMeters.id);
+      
+      if (todayRecord) {
+        // Hay un registro previo hoy - mostrar modal de confirmación
+        setPreviousTodayRecord(todayRecord);
+        setPendingSubmission({ metersUsed, selectedRegisteredBy: registeredBy === 'Otro' ? registeredByCustom.trim() : registeredBy });
+        setDuplicateWarningModalOpen(true);
+        return; // Detener el proceso hasta que el usuario confirme
+      }
     }
 
     try {
@@ -453,6 +517,21 @@ export default function ClientesLealtad() {
       setIsSubmittingMeters(false);
       isSubmittingMetersRef.current = false;
     }
+  };
+
+  // Función para confirmar y proceder con el registro a pesar del duplicado
+  const handleConfirmDuplicate = () => {
+    setDuplicateWarningModalOpen(false);
+    // Crear un evento sintético para pasarlo a handleSubmitMeters
+    const syntheticEvent = { preventDefault: () => {} };
+    handleSubmitMeters(syntheticEvent, true); // bypassDuplicateCheck = true
+  };
+
+  // Función para cancelar el registro duplicado
+  const handleCancelDuplicate = () => {
+    setDuplicateWarningModalOpen(false);
+    setPreviousTodayRecord(null);
+    setPendingSubmission(null);
   };
 
   // Helpers para post-pedido: generar ticket, enviar WhatsApp y cerrar modal
@@ -3420,6 +3499,135 @@ export default function ClientesLealtad() {
                 Guardar Cambios
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🛡️ MODAL DE ADVERTENCIA DE DUPLICADO */}
+      {duplicateWarningModalOpen && previousTodayRecord && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-[60]">
+          <div className="bg-white p-6 rounded-xl w-full max-w-lg shadow-2xl relative animate-scale-in">
+            <div className="absolute top-3 right-3">
+              <button
+                onClick={handleCancelDuplicate}
+                className="text-gray-400 hover:text-gray-600 transition"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* Header con icono de alerta */}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-amber-100 p-3 rounded-full">
+                <svg className="w-8 h-8 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-amber-900">⚠️ Posible Registro Duplicado</h2>
+                <p className="text-sm text-amber-700">Ya hay un registro hoy para este programa</p>
+              </div>
+            </div>
+
+            {/* Información del registro previo */}
+            <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4 mb-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Clock className="text-amber-600" size={20} />
+                <h3 className="font-semibold text-amber-900">Registro Anterior de Hoy:</h3>
+              </div>
+              
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">📏 Metros consumidos:</span>
+                  <span className="font-bold text-amber-900">{Number(previousTodayRecord.meters_consumed).toFixed(2)}m</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">👤 Registrado por:</span>
+                  <span className="font-semibold text-amber-900">{previousTodayRecord.recorded_by || 'No especificado'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">🕐 Hora:</span>
+                  <span className="font-medium text-amber-900">
+                    {new Date(previousTodayRecord.recorded_at).toLocaleTimeString('es-MX', {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </span>
+                </div>
+                {previousTodayRecord.observaciones && (
+                  <div className="pt-2 border-t border-amber-200">
+                    <span className="text-gray-600 block mb-1">📝 Observaciones:</span>
+                    <span className="text-amber-900 italic">"{previousTodayRecord.observaciones}"</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Información del nuevo registro */}
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mb-5">
+              <div className="flex items-center gap-2 mb-3">
+                <Plus className="text-blue-600" size={20} />
+                <h3 className="font-semibold text-blue-900">Nuevo Registro que Deseas Agregar:</h3>
+              </div>
+              
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">📏 Metros a consumir:</span>
+                  <span className="font-bold text-blue-900">{Number(metersToRegister).toFixed(2)}m</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">👤 Registrado por:</span>
+                  <span className="font-semibold text-blue-900">
+                    {registeredBy === 'Otro' ? registeredByCustom : registeredBy}
+                  </span>
+                </div>
+                {observaciones && (
+                  <div className="pt-2 border-t border-blue-200">
+                    <span className="text-gray-600 block mb-1">📝 Observaciones:</span>
+                    <span className="text-blue-900 italic">"{observaciones}"</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Mensaje de advertencia */}
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-5">
+              <p className="text-sm text-red-800">
+                <strong>⚠️ Atención:</strong> Si continúas, se descontarán{' '}
+                <strong className="text-red-900">{Number(metersToRegister).toFixed(2)}m adicionales</strong> del programa.
+                Esto puede causar un descuento duplicado si ya se registró este pedido.
+              </p>
+            </div>
+
+            {/* Pregunta de confirmación */}
+            <div className="mb-5">
+              <p className="text-center text-lg font-semibold text-gray-800 mb-2">
+                ¿Estás seguro de que deseas continuar?
+              </p>
+              <p className="text-center text-sm text-gray-600">
+                Verifica que este registro sea correcto y no sea un duplicado
+              </p>
+            </div>
+
+            {/* Botones de acción */}
+            <div className="flex gap-3">
+              <button
+                onClick={handleCancelDuplicate}
+                className="flex-1 px-4 py-3 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium transition flex items-center justify-center gap-2"
+              >
+                <X size={18} />
+                Cancelar (Recomendado)
+              </button>
+              <button
+                onClick={handleConfirmDuplicate}
+                className="flex-1 px-4 py-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium transition flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Sí, Registrar de Todas Formas
+              </button>
+            </div>
           </div>
         </div>
       )}
